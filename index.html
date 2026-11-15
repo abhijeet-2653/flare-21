@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#F1E8D7" />
+<meta name="description" content="FLARE — a 21-day field guide for tiny, repeatable wins. Pick a thing, mark the day, keep the receipt." />
+<title>FLARE — 21 Day Field Club</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:ital,wdth,wght@0,62..125,100..900;1,62..125,100..900&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/base.css" />
+<link rel="stylesheet" href="css/screens.css" />
+<link rel="stylesheet" href="css/screens2.css" />
+<link rel="stylesheet" href="css/theme.css" />
+</head>
+<body>
+  <div class="stage">
+    <aside class="stage-aside">
+      <div class="stage-brand"><span class="mark">✦</span><span>FLARE</span><span class="stage-tag">FIELD CLUB / 01</span></div>
+      <h1 class="stage-title">SHOW UP.<br /><em>21 TIMES.</em></h1>
+      <p class="stage-lede">A printed 21-day field guide for tiny, repeatable wins. Pick a thing. Mark the day. Keep the receipt.</p>
+      <div class="palette" aria-label="Color palette">
+        <span class="swatch" style="--c:#E8451F"><i></i>Vermilion</span>
+        <span class="swatch" style="--c:#2F49D1"><i></i>Cobalt</span>
+        <span class="swatch" style="--c:#E3A11C"><i></i>Marigold</span>
+        <span class="swatch" style="--c:#5C7F68"><i></i>Sage</span>
+        <span class="swatch" style="--c:#F1E8D7"><i></i>Paper</span>
+      </div>
+      <div class="stage-meta">
+        <span>Riso-print habit study</span>
+        <span>Mobile · 390 × 844</span>
+      </div>
+    </aside>
+
+    <div class="device">
+      <div class="app" id="app">
+        <div class="grain" aria-hidden="true"></div>
+        <main class="view" id="view" aria-live="polite"></main>
+        <nav class="nav" id="nav" aria-label="Main navigation" hidden></nav>
+        <div class="overlay" id="overlay"></div>
+        <canvas id="confetti" class="confetti" aria-hidden="true"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+  <script src="js/data.js"></script>
+  <script src="js/illustrations.js"></script>
+  <script src="js/core.js"></script>
+  <script src="js/screens.js"></script>
+  <script src="js/screens2.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

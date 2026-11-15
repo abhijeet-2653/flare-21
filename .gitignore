@@ -1,0 +1,14 @@
+# QA artifacts and local captures
+shots/
+
+# OS noise
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editors
+.vscode/
+.idea/
+
+# Logs
+*.log
