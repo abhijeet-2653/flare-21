@@ -18,13 +18,13 @@ You can also open `index.html` directly, though the Google Fonts need network ac
 
 ## Deploy
 
-The repo includes a GitHub Actions workflow (`.github/workflows/pages.yml`) that publishes the app to GitHub Pages on every push to `main`.
+GitHub Pages is configured to build from the `main` branch (branch → root). Every push to `main` republishes the site automatically — there is no build step.
 
 1. Push to `main`.
-2. In the repository, open **Settings → Pages** and set **Source** to **GitHub Actions**.
-3. The site is published at <https://abhijeet-2653.github.io/flare-21/>.
+2. GitHub Pages publishes the repository root.
+3. The site is live at <https://abhijeet-2653.github.io/flare-21/>.
 
-Only `index.html`, `favicon.svg`, `css/`, and `js/` are uploaded to Pages. QA captures in `shots/` are git-ignored and never ship.
+Only `index.html`, `favicon.svg`, `css/`, and `js/` are needed at runtime. QA captures in `shots/` are git-ignored and never ship.
 
 Any static host works too — Netlify, Vercel, or Cloudflare Pages need no build command and an output directory of `/`.
 
