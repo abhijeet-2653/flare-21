@@ -12,3 +12,12 @@ desktop.ini
 
 # Logs
 *.log
+
+# Node / Capacitor tooling
+node_modules/
+www/
+
+# Signing material — never commit these
+*.jks
+*.keystore
+keystore.properties

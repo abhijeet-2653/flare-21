@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="paper">#F1E8D7</color>
+    <color name="ink">#181510</color>
+    <color name="vermilion">#E8451F</color>
+    <color name="marigold">#E3A11C</color>
+    <color name="colorPrimary">#E8451F</color>
+    <color name="colorPrimaryDark">#181510</color>
+    <color name="colorAccent">#E8451F</color>
+</resources>

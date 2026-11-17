@@ -12,6 +12,7 @@
   let screen = 'welcome';
   let setup = { step: 1, draft: null, returnTo: 'welcome' };
   let questDay = null;
+  let questReturn = 'home';
   let checks = [false, false, false];
   let justCompleted = null;
   let finalePreview = false;
@@ -181,6 +182,7 @@
       A.toast('Day ' + n + ' unlocks when you get there', 'lock');
       return;
     }
+    questReturn = screen === 'journey' ? 'journey' : 'home';
     questDay = n;
     checks = [false, false, false];
     resetTimerState(n);
@@ -622,6 +624,38 @@
       if (overlay.innerHTML) overlay.innerHTML = '';
     }
   });
+
+  /* Native shell bridge. Returns 'exit' when the back button should leave the app. */
+  window.FLARE_NATIVE = {
+    back: function () {
+      if (overlay.innerHTML) {
+        overlay.innerHTML = '';
+        return 'overlay';
+      }
+      if (screen === 'quest') {
+        navigate(questReturn || 'home');
+        return 'quest';
+      }
+      if (screen === 'setup') {
+        if (setup.step > 1) {
+          setup.step--;
+          view.scrollTop = 0;
+          render();
+        } else {
+          screen = setup.returnTo || 'welcome';
+          view.scrollTop = 0;
+          render();
+        }
+        return 'setup';
+      }
+      if (screen === 'journey' || screen === 'stats' || screen === 'you' || screen === 'finale') {
+        navigate('home');
+        return 'home';
+      }
+      if (screen === 'welcome') return 'exit';
+      return 'exit';
+    },
+  };
 
   boot();
 })();
