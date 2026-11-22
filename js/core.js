@@ -5,27 +5,75 @@ window.App = (function () {
   const DAY = 86400000;
 
   const DEFAULT = {
+    version: 2,
     onboarded: false,
     name: '',
     challengeId: null,
+    challengeKey: null,
+    categoryId: null,
+    challengeName: '',
+    challengeTagline: '',
     customGoal: '',
+    customTask: '',
+    difficulty: '',
     startDate: null,
     completed: [],
     notes: {},
     minutes: 20,
     timeOfDay: 'sunrise',
     reminder: true,
+    reminderTime: '08:00',
+    dailyTarget: '',
+    history: [],
     sound: true,
     motion: true,
   };
 
   function clone(obj) { return JSON.parse(JSON.stringify(obj)); }
 
+  function uniqueSorted(list) {
+    const seen = {};
+    return (Array.isArray(list) ? list : [])
+      .map(function (n) { return parseInt(n, 10); })
+      .filter(function (n) {
+        if (!n || n < 1 || n > 21 || seen[n]) return false;
+        seen[n] = true;
+        return true;
+      })
+      .sort(function (a, b) { return a - b; });
+  }
+
+  function defaultReminder(timeOfDay) {
+    return { sunrise: '07:00', midday: '12:30', sunset: '18:00', moon: '21:00' }[timeOfDay] || '08:00';
+  }
+
+  function normalizeState(raw) {
+    const s = Object.assign(clone(DEFAULT), raw || {});
+    s.completed = uniqueSorted(s.completed);
+    s.history = Array.isArray(s.history) ? s.history.filter(function (r) { return r && r.id; }) : [];
+    s.notes = s.notes && typeof s.notes === 'object' ? s.notes : {};
+    s.version = 2;
+
+    if (!s.challengeKey && s.challengeId) {
+      if (s.challengeId === 'custom') s.challengeKey = 'custom';
+      else if (DATA.getProgram(s.challengeId)) s.challengeKey = s.challengeId;
+      else if (DATA.getCategory(s.challengeId)) s.challengeKey = s.challengeId;
+    }
+    if (!s.reminderTime) s.reminderTime = defaultReminder(s.timeOfDay);
+    if (!s.categoryId && s.challengeKey) {
+      const p = DATA.getProgram(s.challengeKey);
+      if (p) s.categoryId = p.categoryId;
+      else if (s.challengeKey === 'custom') s.categoryId = 'custom';
+    }
+    if (s.startDate || s.history.length) s.onboarded = true;
+    return s;
+  }
+
   function load() {
     try {
       const raw = localStorage.getItem(KEY);
       if (!raw) return clone(DEFAULT);
-      return Object.assign(clone(DEFAULT), JSON.parse(raw));
+      return normalizeState(JSON.parse(raw));
     } catch (e) {
       return clone(DEFAULT);
     }
@@ -33,14 +81,23 @@ window.App = (function () {
 
   let state = load();
   let resetArmed = false;
+  let abandonArmed = false;
 
   function save() {
     try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {}
   }
 
+  function replaceState(raw) {
+    state = normalizeState(raw);
+    resetArmed = false;
+    save();
+    return state;
+  }
+
   function reset() {
     state = clone(DEFAULT);
     resetArmed = false;
+    abandonArmed = false;
     save();
   }
 
@@ -51,8 +108,9 @@ window.App = (function () {
   }
 
   function parseISO(s) {
+    if (!s) return today();
     const p = String(s).split('-').map(Number);
-    return new Date(p[0], p[1] - 1, p[2]);
+    return new Date(p[0], (p[1] || 1) - 1, p[2] || 1);
   }
 
   function iso(d) {
@@ -66,11 +124,10 @@ window.App = (function () {
   }
 
   function dayDate(n) {
-    const d = new Date(startDate().getTime() + (n - 1) * DAY);
-    return d;
+    return new Date(startDate().getTime() + (n - 1) * DAY);
   }
 
-  function clamp(n, lo, hi) { return Math.min(hi, Math.max(lo, n)); }
+  function clamp(n, lo, hi) { return Math.min(hi, Math.max(lo, Math.max(lo, n))); }
 
   function currentDay() {
     if (!state.startDate) return 1;
@@ -82,9 +139,14 @@ window.App = (function () {
 
   function statusOf(n) {
     if (isDone(n)) return 'done';
+    if (!hasActive()) return 'locked';
     if (n === currentDay()) return 'today';
     if (n < currentDay()) return 'missed';
     return 'locked';
+  }
+
+  function countNotes(notes) {
+    return Object.keys(notes || {}).filter(function (k) { return notes[k]; }).length;
   }
 
   function streak() {
@@ -95,23 +157,36 @@ window.App = (function () {
     return n;
   }
 
-  function bestStreak() {
+  function bestStreakFor(list) {
+    const set = {};
+    (list || []).forEach(function (n) { set[n] = true; });
     let best = 0, run = 0;
     for (let i = 1; i <= 21; i++) {
-      if (isDone(i)) { run++; best = Math.max(best, run); } else { run = 0; }
+      if (set[i]) { run++; best = Math.max(best, run); } else { run = 0; }
     }
     return best;
   }
 
-  function xp() {
+  function xpFor(list) {
+    const set = {};
+    (list || []).forEach(function (n) { set[n] = true; });
     let total = 0;
     for (let i = 1; i <= 21; i++) {
-      if (isDone(i)) total += 60 + (isDone(i - 1) ? 20 : 0);
+      if (set[i]) total += 60 + (set[i - 1] ? 20 : 0);
     }
-    if (isDone(7)) total += 50;
-    if (isDone(14)) total += 100;
-    if (isDone(21)) total += 200;
+    if (set[7]) total += 50;
+    if (set[14]) total += 100;
+    if (set[21]) total += 200;
     return total;
+  }
+
+  function xp() { return xpFor(state.completed); }
+
+  function missedDays() {
+    if (!hasActive()) return 0;
+    let count = 0;
+    for (let i = 1; i < currentDay(); i++) if (!isDone(i)) count++;
+    return count;
   }
 
   const LEVELS = [
@@ -136,27 +211,54 @@ window.App = (function () {
     return { current, next, pct: clamp(pct, 0, 100), points, label: 'Level ' + current.n + ' · ' + current.name };
   }
 
+  function makeCustomChallenge() {
+    const goal = state.customGoal || 'my thing';
+    const task = state.customTask || '';
+    return {
+      id: 'custom',
+      categoryId: 'custom',
+      name: goal,
+      tagline: task || ('21 days of ' + goal),
+      description: task
+        ? task + ' Every day for 21 days, in a version small enough to repeat.'
+        : 'Twenty-one days of ' + goal + '. Made up as you go.',
+      color: '#E3A11C',
+      colorSoft: 'rgba(227,161,28,.18)',
+      icon: 'spark',
+      kicker: 'For you',
+      minutes: state.minutes || 20,
+      difficulty: state.difficulty || 'Easy',
+      targetHint: 'optional daily note',
+      benefits: [
+        'Built around something you actually care about',
+        'You choose the size of the daily step',
+        'A simple record of 21 days of trying',
+      ],
+      instructions: task || 'Do the smallest version of ' + goal + ' today. Small enough that a bad day cannot stop you.',
+      tasks: DATA.customTasks(goal, state.minutes || 20),
+    };
+  }
+
   function challenge() {
-    if (state.challengeId === 'custom') {
-      const goal = state.customGoal || 'your own thing';
-      return {
-        id: 'custom',
-        name: 'My thing',
-        tagline: goal,
-        color: '#E3A11C',
-        colorSoft: 'rgba(227,161,28,.16)',
-        icon: 'spark',
-        kicker: 'For you',
-        blurb: 'Twenty-one days of ' + goal + '. Made up as we go.',
-        tasks: DATA.customTasks(goal, state.minutes),
-      };
-    }
-    return DATA.challenges.find(function (c) { return c.id === state.challengeId; }) || DATA.challenges[0];
+    const key = state.challengeKey || state.challengeId;
+    if (!key) return null;
+    if (key === 'custom') return makeCustomChallenge();
+    return DATA.getProgram(key) || null;
+  }
+
+  function hasActive() {
+    return !!(state.startDate && challenge());
+  }
+
+  function displayName(c) {
+    return c ? c.name : '';
   }
 
   function taskFor(day) {
-    const list = challenge().tasks;
-    const t = list[clamp(day - 1, 0, list.length - 1)];
+    const c = challenge();
+    if (!c) return { title: 'Choose a challenge', blurb: 'Pick a category on Home to start your first 21 days.' };
+    const list = c.tasks && c.tasks.length ? c.tasks : DATA.customTasks(c.name, state.minutes);
+    const t = list[clamp(day - 1, 0, list.length - 1)] || ['Show up today', 'One small action is enough.'];
     return { title: t[0], blurb: t[1] };
   }
 
@@ -171,19 +273,71 @@ window.App = (function () {
 
   function metrics() {
     const done = state.completed.length;
-    const noteCount = Object.keys(state.notes).filter(function (k) { return state.notes[k]; }).length;
+    const noteCount = countNotes(state.notes);
     return {
       day: currentDay(),
       done: done,
       pct: Math.round((done / 21) * 100),
       streak: streak(),
-      bestStreak: bestStreak(),
+      bestStreak: bestStreakFor(state.completed),
       xp: xp(),
       minutes: done * state.minutes,
       notes: noteCount,
       timeOfDay: state.timeOfDay,
       level: levelInfo(),
+      missed: missedDays(),
     };
+  }
+
+  function allTimeXp() {
+    return state.history.reduce(function (sum, r) { return sum + (r.xp || 0); }, 0) + xp();
+  }
+
+  function allTimeDays() {
+    return state.history.reduce(function (sum, r) { return sum + ((r.completed || []).length); }, 0) + state.completed.length;
+  }
+
+  function findHistory(id) {
+    return state.history.find(function (r) { return r.id === id; }) || null;
+  }
+
+  function archiveCurrent() {
+    const c = challenge();
+    if (!c) return null;
+    const record = {
+      id: (state.challengeKey || 'challenge') + '-' + Date.now(),
+      key: state.challengeKey || state.challengeId,
+      categoryId: c.categoryId || state.categoryId,
+      name: displayName(c),
+      tagline: c.tagline,
+      color: c.color || '#E8451F',
+      icon: c.icon || 'spark',
+      difficulty: c.difficulty || state.difficulty,
+      minutes: state.minutes,
+      dailyTarget: state.dailyTarget || '',
+      startDate: state.startDate,
+      completedAt: iso(today()),
+      completed: state.completed.slice(),
+      notes: clone(state.notes),
+      xp: xp(),
+      bestStreak: bestStreakFor(state.completed),
+    };
+    state.history.unshift(record);
+
+    state.challengeId = null;
+    state.challengeKey = null;
+    state.categoryId = null;
+    state.challengeName = '';
+    state.challengeTagline = '';
+    state.customGoal = '';
+    state.customTask = '';
+    state.difficulty = '';
+    state.startDate = null;
+    state.completed = [];
+    state.notes = {};
+    state.dailyTarget = '';
+    save();
+    return record;
   }
 
   function quote() {
@@ -209,6 +363,18 @@ window.App = (function () {
     return d.toLocaleDateString('en-US', opts || { weekday: 'short', month: 'short', day: 'numeric' });
   }
 
+  function formatLongDate(d) {
+    return d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+  }
+
+  function formatShortDate(d) {
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  }
+
+  function formatRange(a, b) {
+    return formatShortDate(parseISO(a)) + ' – ' + formatShortDate(parseISO(b));
+  }
+
   const TIME_LABELS = {
     sunrise: { label: 'Sunrise', window: '6 – 9 am', icon: 'sunrise' },
     midday: { label: 'Midday', window: '12 – 2 pm', icon: 'sun' },
@@ -218,6 +384,27 @@ window.App = (function () {
 
   function timeLabel() {
     return TIME_LABELS[state.timeOfDay] || TIME_LABELS.sunrise;
+  }
+
+  function timeOfDayFor(time) {
+    const hour = parseInt(String(time || '08:00').split(':')[0], 10);
+    if (hour < 10) return 'sunrise';
+    if (hour < 15) return 'midday';
+    if (hour < 19) return 'sunset';
+    return 'moon';
+  }
+
+  function reminderLabelFor(time) {
+    const parts = String(time || '08:00').split(':');
+    const hour = parseInt(parts[0], 10);
+    const minute = parts[1] || '00';
+    const suffix = hour >= 12 ? 'PM' : 'AM';
+    const h12 = hour % 12 || 12;
+    return h12 + ':' + minute + ' ' + suffix;
+  }
+
+  function reminderLabel() {
+    return reminderLabelFor(state.reminderTime);
   }
 
   function greeting() {
@@ -271,6 +458,8 @@ window.App = (function () {
     note: '<path d="M6 3.5h9.5L20 8v12.5H6V3.5Z"/><path d="M15 3.5V8h4.5M9 12h6M9 15.5h4"/>',
     heart: '<path d="M12 20.5S3.5 15 3.5 8.8A4.3 4.3 0 0 1 12 6a4.3 4.3 0 0 1 8.5 2.8c0 6.2-8.5 11.7-8.5 11.7Z"/>',
     plus: '<path d="M12 5v14M5 12h14"/>',
+    download: '<path d="M12 3v12M7 10.5l5 5 5-5"/><path d="M4 20h16"/>',
+    upload: '<path d="M12 16V4M7 8.5l5-5 5 5"/><path d="M4 20h16"/>',
   };
 
   function icon(name, size) {
@@ -365,6 +554,13 @@ window.App = (function () {
     if (!rafId) rafId = requestAnimationFrame(loop);
   }
 
+  function clearConfetti() {
+    particles = [];
+    if (rafId) cancelAnimationFrame(rafId);
+    rafId = null;
+    ctx.clearRect(0, 0, app.clientWidth, app.clientHeight);
+  }
+
   window.addEventListener('resize', sizeCanvas);
   sizeCanvas();
 
@@ -411,7 +607,7 @@ window.App = (function () {
     toastEl.innerHTML = (iconName ? icon(iconName, 15) : '') + '<span>' + esc(message) + '</span>';
     toastEl.classList.add('show');
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(function () { toastEl.classList.remove('show'); }, 2600);
+    toastTimer = setTimeout(function () { toastEl.classList.remove('show'); }, 2800);
   }
 
   return {
@@ -422,8 +618,12 @@ window.App = (function () {
     set state(v) { state = v; },
     get resetArmed() { return resetArmed; },
     set resetArmed(v) { resetArmed = v; },
+    get abandonArmed() { return abandonArmed; },
+    set abandonArmed(v) { abandonArmed = v; },
     save: save,
+    replaceState: replaceState,
     reset: reset,
+    normalizeState: normalizeState,
     today: today,
     iso: iso,
     parseISO: parseISO,
@@ -433,6 +633,8 @@ window.App = (function () {
     isDone: isDone,
     statusOf: statusOf,
     challenge: challenge,
+    hasActive: hasActive,
+    displayName: displayName,
     taskFor: taskFor,
     stepsFor: stepsFor,
     metrics: metrics,
@@ -440,13 +642,28 @@ window.App = (function () {
     badgeList: badgeList,
     levelInfo: levelInfo,
     timeLabel: timeLabel,
+    timeOfDayFor: timeOfDayFor,
+    reminderLabel: reminderLabel,
+    reminderLabelFor: reminderLabelFor,
     greeting: greeting,
     weekdayShort: weekdayShort,
     weekdayLetter: weekdayLetter,
     formatDate: formatDate,
+    formatLongDate: formatLongDate,
+    formatShortDate: formatShortDate,
+    formatRange: formatRange,
+    missedDays: missedDays,
+    countNotes: countNotes,
+    xpFor: xpFor,
+    bestStreakFor: bestStreakFor,
+    allTimeXp: allTimeXp,
+    allTimeDays: allTimeDays,
+    findHistory: findHistory,
+    archiveCurrent: archiveCurrent,
     esc: esc,
     icon: icon,
     burst: burst,
+    clearConfetti: clearConfetti,
     chime: chime,
     buzz: buzz,
     toast: toast,

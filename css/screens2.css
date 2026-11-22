@@ -1078,6 +1078,7 @@
 .celebrate {
   position: absolute;
   inset: 0;
+  z-index: 95;
   display: flex;
   align-items: flex-end;
   padding: 18px;
@@ -1353,6 +1354,7 @@
   font-weight: 400;
   text-transform: none;
   letter-spacing: -0.02em;
+  white-space: nowrap;
 }
 
 .story-grid {

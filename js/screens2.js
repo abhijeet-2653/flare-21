@@ -1,200 +1,196 @@
-/* FLARE — screen markup: journey, stats, you, quest, finale, celebrate */
+/* FLARE — screen markup: journey, achievements, profile, quest, completion */
 (function () {
   const A = window.App;
   const I = window.ILLUS;
   const esc = A.esc;
   const icon = A.icon;
 
+  function pad(n) { return String(n).padStart(2, '0'); }
+
+  function progress(pct) {
+    return '<div class="progress-track"><div class="progress-fill" style="--w:' + Math.max(0, Math.min(100, pct)) + '%"></div></div>';
+  }
+
+  function milestoneCard(day, opts) {
+    opts = opts || {};
+    const reward = day === 7 ? 50 : day === 14 ? 100 : 200;
+    const title = day === 7 ? 'Week one' : day === 14 ? 'Two weeks in' : 'The full 21';
+    const unlocked = !!opts.unlocked;
+    const count = opts.count || 0;
+    const sub = opts.active
+      ? (unlocked ? 'Unlocked · ' + reward + ' XP banked' : 'Reach day ' + day + ' for +' + reward + ' XP')
+      : (count ? 'Earned in ' + count + ' challenge' + (count === 1 ? '' : 's') : 'Finish day ' + day + ' to unlock');
+    return '<div class="milestone-card ' + (unlocked ? '' : 'locked') + '">' +
+      '<span class="medal">' + icon(day === 21 ? 'trophy' : 'star', 18) + '</span>' +
+      '<div><b>Day ' + day + ' · ' + title + '</b><small>' + sub + '</small></div>' +
+      '<span class="xp-bonus">+' + reward + ' XP</span>' +
+      '</div>';
+  }
+
   /* -------------------------------- journey ----------------------------- */
 
-  function dayRow(n) {
-    const s = A.statusOf(n);
-    const t = A.taskFor(n);
-    const label = s === 'done' ? 'Done' : s === 'today' ? 'Today' : s === 'missed' ? 'Missed' : 'Locked';
-    let right = icon('lock', 14);
-    if (s === 'done') right = icon('check', 16);
-    else if (s === 'today') right = icon('chev', 15);
-    else if (s === 'missed') right = icon('plus', 15);
-
-    return '<div class="day-row ' + s + '" data-open-day="' + n + '" role="button" tabindex="0" aria-label="Day ' + n + ': ' + esc(t.title) + '">' +
-      '<span class="day-node">' + (s === 'done' ? icon('check', 14) : n) + '</span>' +
-      '<div class="day-card">' +
-        '<div class="day-info">' +
-          '<p class="day-title">' + esc(t.title) + '</p>' +
-          '<div class="day-meta"><span>' + A.weekdayShort(n) + '</span><span>·</span><span>' + A.state.minutes + ' min</span><span class="st ' + s + '">' + label + '</span></div>' +
-        '</div>' +
-        '<span class="day-right">' + right + '</span>' +
-      '</div>' +
-      '</div>';
-  }
-
-  function milestone(w) {
-    const day = w * 7;
-    const done = A.isDone(day);
-    const bonus = w === 1 ? 50 : w === 2 ? 100 : 200;
-    const title = w === 1 ? 'Week one, done' : w === 2 ? 'Two weeks of showing up' : 'The full 21';
-    const sub = w === 3 ? 'The finish line is a feeling' : 'Finish day ' + day + ' for bonus XP';
-    return '<div class="milestone-card ' + (done ? '' : 'locked') + '">' +
-      '<span class="medal">' + icon(w === 3 ? 'trophy' : 'star', 18) + '</span>' +
-      '<div><b>' + title + '</b><small>' + sub + '</small></div>' +
-      '<span class="xp-bonus">+' + bonus + ' XP</span>' +
-      '</div>';
-  }
-
   function journey() {
-    const m = A.metrics();
-    const titles = ['The start', 'The middle', 'The finish'];
-    let blocks = '';
+    if (!A.hasActive()) {
+      return '<section class="screen journey">' +
+        '<div class="topbar">' +
+          '<button type="button" class="icon-btn" data-act="go-back" aria-label="Back">' + icon('back', 18) + '</button>' +
+          '<span class="topbar-center">Your journey</span>' +
+          '<span class="topbar-spacer"></span>' +
+        '</div>' +
+        '<div class="empty-state tall">' +
+          '<span class="empty-ico">' + icon('route', 26) + '</span>' +
+          '<h2>No journey running.</h2>' +
+          '<p>Start a 21-day challenge and every completed day will land here.</p>' +
+          '<button type="button" class="btn btn-primary" data-act="go-home">Choose a challenge</button>' +
+        '</div>' +
+        '</section>';
+    }
 
+    const c = A.challenge();
+    const m = A.metrics();
+    const day = m.day;
+
+    function dayCell(n) {
+      const s = A.statusOf(n);
+      const t = A.taskFor(n);
+      return '<button type="button" class="cal-day ' + s + (n === day ? ' is-today' : '') + '" data-open-day="' + n + '" aria-label="Day ' + n + ': ' + esc(t.title) + '">' +
+        '<span class="cal-wd">' + A.weekdayLetter(n) + '</span>' +
+        '<b>' + n + '</b>' +
+        '<span class="cal-date">' + A.dayDate(n).getDate() + '</span>' +
+        '</button>';
+    }
+
+    let weeks = '';
     [1, 2, 3].forEach(function (w) {
       const start = (w - 1) * 7 + 1;
       const end = start + 6;
-      let count = 0;
-      let rows = '';
-      for (let n = start; n <= end; n++) {
-        if (A.isDone(n)) count++;
-        rows += dayRow(n);
-      }
-      blocks += '<div class="week-block">' +
-        '<div class="week-block-head">' +
-          '<span class="week-badge" style="color:' + (w === 1 ? 'var(--lime)' : w === 2 ? 'var(--violet)' : 'var(--butter)') + '">' + icon(w === 1 ? 'bolt' : w === 2 ? 'wave' : 'trophy', 15) + '</span>' +
-          '<div class="wbh-text"><b>Week ' + w + '</b><small>' + titles[w - 1] + ' · days ' + start + '–' + end + '</small></div>' +
-          '<span class="week-progress">' + count + '/7</span>' +
-        '</div>' +
-        '<div class="day-list">' + rows + '</div>' +
-        milestone(w) +
+      let cells = '';
+      for (let n = start; n <= end; n++) cells += dayCell(n);
+      weeks += '<div class="cal-week">' +
+        '<div class="cal-week-head"><b>Week ' + w + '</b><span>Days ' + start + '–' + end + '</span></div>' +
+        '<div class="cal-grid">' + cells + '</div>' +
         '</div>';
     });
 
     return '<section class="screen journey">' +
       '<div class="topbar">' +
-        '<div class="brand"><span class="brand-mark">✦</span><span>FLARE</span></div>' +
-        '<span class="pill">' + m.done + ' / 21 marked</span>' +
+        '<button type="button" class="icon-btn" data-act="go-back" aria-label="Back">' + icon('back', 18) + '</button>' +
+        '<span class="topbar-center">' + esc(c.name) + '</span>' +
+        '<span class="topbar-spacer"></span>' +
       '</div>' +
 
       '<div class="journey-head">' +
         '<p class="kicker"><span class="dot"></span> The whole journey</p>' +
-        '<h1 class="title">The whole<br><em>twenty-one.</em></h1>' +
-        '<p class="lede">Every tiny receipt. Tap a day to open the quest, make up a missed one, or peek ahead.</p>' +
+        '<h1 class="title">The 21-day <em>journey.</em></h1>' +
+        '<p class="lede">Tap any day you have reached. Completed days keep your notes. Missed days can still be made up.</p>' +
       '</div>' +
 
       '<div class="progress-card">' +
-        '<div class="progress-top"><b>' + m.done + '<small> / 21 days</small></b><span>' + m.pct + '% in</span></div>' +
-        '<div class="progress-track"><div class="progress-fill" style="--w:' + m.pct + '%"></div></div>' +
+        '<div class="progress-top"><b>' + m.done + '<small> / 21 days</small></b><span>Day ' + pad(day) + '</span></div>' +
+        progress(m.pct) +
+        '<div class="progress-foot"><span>' + m.pct + '% complete</span><span>' + (21 - m.done) + ' days to go</span></div>' +
       '</div>' +
 
-      '<div class="journey-actions">' +
-        '<div class="legend-inline"><span><i style="background:var(--tomato)"></i>Done</span><span><i style="background:var(--ink)"></i>Today</span><span><i style="background:var(--tomato)"></i>Missed</span></div>' +
-        '<button class="link-btn" data-act="jump-today">Jump to today ' + icon('arrow', 12) + '</button>' +
+      '<div class="calendar-card">' +
+        '<div class="calendar-head"><span class="section-label">Your 21 days</span><button type="button" class="link-btn" data-act="jump-today">Jump to today ' + icon('arrow', 12) + '</button></div>' +
+        '<div class="legend-inline"><span><i class="done"></i>Done</span><span><i class="today"></i>Today</span><span><i class="missed"></i>Missed</span><span><i class="locked"></i>Upcoming</span></div>' +
+        weeks +
       '</div>' +
 
-      blocks +
+      '<div class="section-head"><span class="section-label">Milestones</span><span class="section-note">Bonus rewards</span></div>' +
+      '<div class="milestone-list">' +
+        milestoneCard(7, { unlocked: A.isDone(7), active: true }) +
+        milestoneCard(14, { unlocked: A.isDone(14), active: true }) +
+        milestoneCard(21, { unlocked: A.isDone(21), active: true }) +
+      '</div>' +
+
+      (m.missed > 0
+        ? '<div class="recovery-panel">' + icon('reset', 18) + '<div><b>' + m.missed + ' missed day' + (m.missed === 1 ? '' : 's') + '.</b><p>Nothing is lost. Open a missed day and complete it when you can — the challenge and your notes stay put.</p></div></div>'
+        : '') +
 
       '<p class="journey-note">“Rest is part of the streak. Missing a day isn’t a failure — it’s a plot twist.”</p>' +
       '</section>';
   }
 
-  /* --------------------------------- stats ------------------------------ */
+  /* ------------------------------ achievements -------------------------- */
 
-  function stats() {
+  function achievements() {
+    const history = A.state.history || [];
+    const active = A.hasActive();
     const m = A.metrics();
-    const day = m.day;
-    const week = Math.ceil(day / 7);
-    const first = (week - 1) * 7 + 1;
-    const heights = [];
-    const letters = [];
 
-    for (let i = 0; i < 7; i++) {
-      const n = first + i;
-      const done = A.isDone(n);
-      let h = 4;
-      if (done) h = 52 + (A.isDone(n - 1) ? 12 : 0);
-      if (n === day && !done) h = 10;
-      heights.push({ n: n, h: h, done: done, today: n === day });
-    }
-    const max = 72;
-
-    const bars = heights.map(function (b, i) {
-      const cls = b.done ? 'on' : b.today ? 'today' : '';
-      return '<div class="bar-col"><div class="bar ' + cls + '" style="--h:' + ((b.h / max) * 100) + ';--i:' + i + '"></div><span class="' + (b.today ? 'now' : '') + '">' + A.weekdayLetter(b.n) + '</span></div>';
+    const certs = history.map(function (r) {
+      return '<article class="cert-card" style="--c:' + (r.color || '#E8451F') + '">' +
+        '<button type="button" class="cert-main" data-history="' + esc(r.id) + '">' +
+          '<span class="cert-stripe"></span>' +
+          '<span class="cert-body">' +
+            '<span class="cert-top"><span class="cert-badge">' + icon('check', 12) + ' COMPLETE</span><span class="cert-days">21 / 21</span></span>' +
+            '<b class="cert-name">' + esc(r.name) + '</b>' +
+            '<span class="cert-meta">' + A.formatShortDate(A.parseISO(r.startDate)) + ' – ' + A.formatShortDate(A.parseISO(r.completedAt)) + ' · ' + (r.bestStreak || 21) + '-day best streak</span>' +
+          '</span>' +
+          '<span class="cert-chev">' + icon('chev', 14) + '</span>' +
+        '</button>' +
+        '<button type="button" class="cert-share" data-act="share-achievement" data-record="' + esc(r.id) + '" aria-label="Share ' + esc(r.name) + ' achievement">' + icon('share', 16) + '</button>' +
+        '</article>';
     }).join('');
 
-    const heat = [];
-    for (let n = 1; n <= 21; n++) {
-      const s = A.statusOf(n);
-      heat.push('<span class="heat-cell ' + s + '" title="Day ' + n + ' · ' + s + '">' + n + '</span>');
-    }
+    const counts = { 7: 0, 14: 0, 21: 0 };
+    history.forEach(function (r) {
+      [7, 14, 21].forEach(function (n) {
+        if ((r.completed || []).indexOf(n) > -1) counts[n]++;
+      });
+    });
 
-    const badges = A.badgeList().map(function (b) {
-      return '<div class="badge ' + (b.unlocked ? '' : 'locked') + '" style="--c:' + b.color + '">' +
-        (b.unlocked ? '' : '<span class="lock">' + icon('lock', 12) + '</span>') +
-        '<span class="badge-ico">' + icon(b.icon, 18) + '</span>' +
-        '<b>' + b.name + '</b>' +
-        '<small>' + b.desc + '</small>' +
-        '</div>';
-    }).join('');
-
-    const unlocked = A.badgeList().filter(function (b) { return b.unlocked; }).length;
-
-    return '<section class="screen stats">' +
+    return '<section class="screen achievements">' +
       '<div class="topbar">' +
         '<div class="brand"><span class="brand-mark">✦</span><span>FLARE</span></div>' +
-        '<span class="pill lime">' + m.pct + '% marked</span>' +
+        '<span class="pill">' + history.length + ' finished</span>' +
       '</div>' +
 
-      '<div class="stats-head">' +
-        '<p class="kicker violet"><span class="dot"></span> The receipts</p>' +
-        '<h1 class="title">Your receipts,<br><em>in numbers.</em></h1>' +
-        '<p class="lede">Consistency beats intensity. Every bar here is a day you chose yourself.</p>' +
+      '<div class="hub-head">' +
+        '<p class="kicker"><span class="dot"></span> The trophy shelf</p>' +
+        '<h1 class="title">Achievements<em>.</em></h1>' +
+        '<p class="hub-lede">Receipts for the days you showed up.</p>' +
       '</div>' +
 
-      '<div class="stat-hero">' +
-        S.ring(m.pct, { big: true, cap: 'of 21 days' }) +
-        '<div class="stat-hero-text"><h2>' + m.done + ' of 21 days <em>marked.</em></h2><p>You’re ' + (100 - m.pct) + '% away from a brand-new default. Keep showing up ugly.</p></div>' +
+      '<div class="ach-tiles">' +
+        '<div class="stat-tile"><b>' + history.length + '</b><span>Challenges</span></div>' +
+        '<div class="stat-tile"><b>' + A.allTimeDays() + '</b><span>Days marked</span></div>' +
+        '<div class="stat-tile"><b>' + A.allTimeXp() + '</b><span>Total XP</span></div>' +
       '</div>' +
 
-      '<div class="stat-tiles">' +
-        '<div class="stat-tile"><b>' + m.xp + '</b><span>Total XP</span></div>' +
-        '<div class="stat-tile"><b>' + m.minutes + '</b><span>Minutes</span></div>' +
-        '<div class="stat-tile"><b>' + m.streak + '</b><span>Day streak</span></div>' +
+      '<div class="section-head"><span class="section-label">Milestone rewards</span><span class="section-note">Days 7, 14, 21</span></div>' +
+      '<div class="milestone-list">' +
+        milestoneCard(7, { unlocked: (active && A.isDone(7)) || counts[7] > 0, count: counts[7] }) +
+        milestoneCard(14, { unlocked: (active && A.isDone(14)) || counts[14] > 0, count: counts[14] }) +
+        milestoneCard(21, { unlocked: (active && A.isDone(21)) || counts[21] > 0, count: counts[21] }) +
       '</div>' +
 
-      '<div class="chart-card">' +
-        '<div class="card-head"><b>This week’s energy</b><small>XP earned</small></div>' +
-        '<div class="bars">' + bars + '</div>' +
+      '<div class="section-head"><span class="section-label">Completed challenges</span>' +
+        (history.length ? '<span class="section-note">' + history.length + ' certificate' + (history.length === 1 ? '' : 's') + '</span>' : '') +
       '</div>' +
-
-      '<div class="chart-card">' +
-        '<div class="card-head"><b>21-day map</b><small>Week ' + week + ' of 3</small></div>' +
-        '<div class="heat-grid">' + heat.join('') + '</div>' +
-        '<div class="heat-legend">' +
-          '<span><i style="background:var(--tomato)"></i>Done</span>' +
-          '<span><i style="background:rgba(232,69,31,.45)"></i>Missed</span>' +
-          '<span><i style="border:1.5px solid var(--ink);background:var(--cream)"></i>Today</span>' +
-          '<span><i style="background:var(--paper-3)"></i>Ahead</span>' +
-        '</div>' +
-      '</div>' +
-
-      '<div class="chart-card">' +
-        '<div class="card-head"><b>Stamps earned</b><small>' + unlocked + ' / ' + A.badgeList().length + '</small></div>' +
-        '<div class="badge-grid">' + badges + '</div>' +
-      '</div>' +
-
-      '<button class="share-cta" data-act="share">' +
-        '<span><b>Share your receipts</b><small>Story card · 9:16 · made for the group chat</small></span>' +
-        '<span class="share-ico">' + icon('share', 18) + '</span>' +
-      '</button>' +
+      (history.length
+        ? '<div class="cert-list stagger">' + certs + '</div>'
+        : '<div class="empty-state">' +
+            '<span class="empty-ico">' + icon('trophy', 26) + '</span>' +
+            '<h2>No certificates yet.</h2>' +
+            '<p>Finish all 21 days of a challenge and it will live here, with a shareable completion card.</p>' +
+            '<button type="button" class="btn btn-primary small" data-act="go-home">Start a challenge</button>' +
+          '</div>') +
       '</section>';
   }
 
-  /* --------------------------------- you -------------------------------- */
+  /* -------------------------------- profile ----------------------------- */
 
-  function you() {
+  function profile() {
+    const st = A.state;
     const m = A.metrics();
-    const c = A.challenge();
-    const lvl = m.level;
-    const name = A.state.name || 'Anonymous member';
+    const active = A.hasActive();
+    const c = active ? A.challenge() : null;
     const armed = A.resetArmed;
+    const abandonArmed = !!A.abandonArmed;
+    const native = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+    const name = st.name || 'Anonymous member';
 
     return '<section class="screen you">' +
       '<div class="topbar">' +
@@ -202,42 +198,52 @@
         '<span class="pill">Member 0021</span>' +
       '</div>' +
 
-      '<div class="you-head">' +
-        '<p class="kicker"><span class="dot"></span> The human behind the streak</p>' +
-        '<h1 class="title">This is<br><em>you.</em></h1>' +
+      '<div class="hub-head">' +
+        '<p class="kicker"><span class="dot"></span> The field club member</p>' +
+        '<h1 class="title">Your <em>profile.</em></h1>' +
       '</div>' +
 
       '<div class="profile-card">' +
-        '<div class="avatar big"><span>' + esc((A.state.name || 'F').charAt(0).toUpperCase()) + '</span></div>' +
+        '<div class="avatar big"><span>' + esc((st.name || 'F').charAt(0).toUpperCase()) + '</span></div>' +
         '<div class="profile-info">' +
-          '<div class="profile-name">' + esc(name) + '<span class="level-chip">Lv. ' + lvl.current.n + '</span></div>' +
-          '<div class="profile-level">' + lvl.label + ' · ' + m.done + ' days in</div>' +
-          '<div class="xp-line">' +
-            '<div class="xp-meta"><span>' + m.xp + ' XP</span><span>' + (lvl.next ? lvl.next.at + ' to ' + lvl.next.name : 'Max count') + '</span></div>' +
-            '<div class="xp-track"><div class="xp-fill" style="width:' + lvl.pct + '%"></div></div>' +
-          '</div>' +
+          '<div class="profile-name">' + esc(name) + '</div>' +
+          '<div class="profile-level">' + (A.state.history.length) + ' challenge' + (A.state.history.length === 1 ? '' : 's') + ' finished · ' + A.allTimeDays() + ' days marked</div>' +
+          '<div class="xp-meta"><span>' + A.allTimeXp() + ' XP</span><span>21-day field club</span></div>' +
         '</div>' +
       '</div>' +
 
-      '<div class="challenge-mini" style="--c:' + c.color + ';--c-soft:' + c.colorSoft + '">' +
-        '<span class="cm-ico">' + icon(c.icon, 19) + '</span>' +
-        '<div><b>' + esc(c.name === 'My thing' ? (A.state.customGoal || 'My thing') : c.name) + '</b><small>' + esc(c.tagline) + '</small></div>' +
-        '<span class="pill">Day ' + m.day + '</span>' +
+      '<div class="setup-card profile-form">' +
+        '<label class="field-label" for="profileName">Display name</label>' +
+        '<input class="input" id="profileName" maxlength="22" value="' + esc(st.name) + '" placeholder="Your first name" />' +
+      '</div>' +
+
+      '<span class="section-label">Reminders</span>' +
+      '<div class="list-card" style="margin-top:9px">' +
+        '<div class="list-row"><span class="list-ico">' + icon('bell', 16) + '</span><div class="list-txt"><b>Daily reminder</b><small>' + (native ? 'Scheduled on this device' : 'Saved for the Android app') + '</small></div><button type="button" class="switch" data-toggle="reminder" aria-pressed="' + (st.reminder ? 'true' : 'false') + '" aria-label="Daily reminder"></button></div>' +
+        '<div class="list-row reminder-time-row"><span class="list-ico">' + icon('clock', 16) + '</span><div class="list-txt"><b>Reminder time</b><small>One gentle notification</small></div><input class="time-input" id="profileReminderTime" type="time" value="' + esc(st.reminderTime || '08:00') + '" aria-label="Reminder time" /></div>' +
+        (native ? '' : '<div class="list-note">' + icon('bell', 14) + ' Notifications are delivered by the Android app.</div>') +
       '</div>' +
 
       '<span class="section-label">Settings</span>' +
       '<div class="list-card" style="margin-top:9px">' +
-        '<div class="list-row"><span class="list-ico">' + icon('sound', 16) + '</span><div class="list-txt"><b>Sound effects</b><small>Little chimes for little wins</small></div><button class="switch" data-toggle="sound" aria-pressed="' + (A.state.sound ? 'true' : 'false') + '" aria-label="Sound effects"></button></div>' +
-        '<div class="list-row"><span class="list-ico">' + icon('wave', 16) + '</span><div class="list-txt"><b>Reduce motion</b><small>Calm it all the way down</small></div><button class="switch" data-toggle="motion" aria-pressed="' + (A.state.motion ? 'true' : 'false') + '" aria-label="Reduce motion"></button></div>' +
-        '<div class="list-row"><span class="list-ico">' + icon('bell', 16) + '</span><div class="list-txt"><b>Daily nudge</b><small>' + A.timeLabel().label + ' · ' + A.timeLabel().window + '</small></div><button class="switch" data-toggle="reminder" aria-pressed="' + (A.state.reminder ? 'true' : 'false') + '" aria-label="Daily reminder"></button></div>' +
+        '<div class="list-row"><span class="list-ico">' + icon('sound', 16) + '</span><div class="list-txt"><b>Sound effects</b><small>Little chimes for little wins</small></div><button type="button" class="switch" data-toggle="sound" aria-pressed="' + (st.sound ? 'true' : 'false') + '" aria-label="Sound effects"></button></div>' +
+        '<div class="list-row"><span class="list-ico">' + icon('wave', 16) + '</span><div class="list-txt"><b>Reduce motion</b><small>Calm it all the way down</small></div><button type="button" class="switch" data-toggle="motion" aria-pressed="' + (st.motion ? 'true' : 'false') + '" aria-label="Reduce motion"></button></div>' +
       '</div>' +
 
-      '<span class="section-label">The controls</span>' +
+      '<span class="section-label">Your data</span>' +
       '<div class="list-card" style="margin-top:9px">' +
-        '<button class="list-row" data-act="change-goal"><span class="list-ico">' + icon('reset', 16) + '</span><div class="list-txt"><b>Change my goal</b><small>Start a fresh 21 with a new thing</small></div><span class="chev">' + icon('chev', 15) + '</span></button>' +
-        '<button class="list-row" data-act="preview-finale"><span class="list-ico">' + icon('trophy', 16) + '</span><div class="list-txt"><b>Peek the finale</b><small>See the view from day 21</small></div><span class="chev">' + icon('chev', 15) + '</span></button>' +
-        '<button class="list-row" data-act="next-day"><span class="list-ico">' + icon('clock', 16) + '</span><div class="list-txt"><b>Skip to next day</b><small>Demo control · fast-forward the calendar</small></div><span class="chev">' + icon('chev', 15) + '</span></button>' +
-        '<button class="list-row danger ' + (armed ? 'armed' : '') + '" data-act="reset"><span class="list-ico">' + icon('close', 16) + '</span><div class="list-txt"><b>' + (armed ? 'Tap again to erase' : 'Reset everything') + '</b><small>' + (armed ? 'This clears your goal, streak and notes.' : 'Wipe the demo and start over') + '</small></div><span class="chev">' + icon('chev', 15) + '</span></button>' +
+        '<button type="button" class="list-row" data-act="export-backup"><span class="list-ico">' + icon('download', 16) + '</span><div class="list-txt"><b>Back up my data</b><small>Save challenges, notes and settings as a JSON file</small></div><span class="chev">' + icon('chev', 15) + '</span></button>' +
+        '<button type="button" class="list-row" data-act="import-backup"><span class="list-ico">' + icon('upload', 16) + '</span><div class="list-txt"><b>Restore a backup</b><small>Import a FLARE backup file</small></div><span class="chev">' + icon('chev', 15) + '</span></button>' +
+        '<input type="file" id="importFile" accept="application/json,.json" hidden />' +
+      '</div>' +
+
+      '<span class="section-label">Challenge</span>' +
+      '<div class="list-card" style="margin-top:9px">' +
+        (active
+          ? '<div class="list-row challenge-row"><span class="list-ico">' + icon(c.icon, 16) + '</span><div class="list-txt"><b>' + esc(c.name) + '</b><small>Day ' + pad(m.day) + ' of 21 · ' + m.done + ' days done</small></div><button type="button" class="link-btn" data-go="journey">Journey</button></div>' +
+            '<button type="button" class="list-row danger ' + (abandonArmed ? 'armed' : '') + '" data-act="abandon-challenge"><span class="list-ico">' + icon('reset', 16) + '</span><div class="list-txt"><b>' + (abandonArmed ? 'Tap again to leave' : 'Leave this challenge') + '</b><small>' + (abandonArmed ? 'Your active progress will be cleared.' : 'Start over or choose something else') + '</small></div><span class="chev">' + icon('chev', 15) + '</span></button>'
+          : '<button type="button" class="list-row" data-act="go-home"><span class="list-ico">' + icon('plus', 16) + '</span><div class="list-txt"><b>Start a new challenge</b><small>Pick a category on Home</small></div><span class="chev">' + icon('chev', 15) + '</span></button>') +
+        '<button type="button" class="list-row danger ' + (armed ? 'armed' : '') + '" data-act="reset"><span class="list-ico">' + icon('close', 16) + '</span><div class="list-txt"><b>' + (armed ? 'Tap again to erase' : 'Reset everything') + '</b><small>' + (armed ? 'This clears challenges, notes and settings.' : 'Wipe all FLARE data on this device') + '</small></div><span class="chev">' + icon('chev', 15) + '</span></button>' +
       '</div>' +
 
       '<p class="you-foot">FLARE · a 21-day field club · riso print study<br>For the ones who keep count.</p>' +
@@ -247,23 +253,35 @@
   /* --------------------------------- quest ------------------------------ */
 
   function quest(day) {
+    if (!A.hasActive()) {
+      return '<section class="screen quest">' +
+        '<div class="topbar">' +
+          '<button type="button" class="icon-btn" data-act="go-home" aria-label="Back">' + icon('back', 18) + '</button>' +
+          '<span class="topbar-center">Daily challenge</span>' +
+          '<span class="topbar-spacer"></span>' +
+        '</div>' +
+        '<div class="empty-state tall"><span class="empty-ico">' + icon('spark', 26) + '</span><h2>No active challenge.</h2><p>Choose a category on Home to begin.</p><button type="button" class="btn btn-primary" data-act="go-home">Go to Home</button></div>' +
+        '</section>';
+    }
+
     const st = A.state;
-    const s = A.statusOf(day);
     const c = A.challenge();
+    const m = A.metrics();
     const t = A.taskFor(day);
-    const steps = A.stepsFor(day);
-    const done = s === 'done';
+    const done = A.isDone(day);
     const locked = day > A.currentDay();
+    const missed = !done && day < A.currentDay();
+    const milestone = day === 7 || day === 14 || day === 21;
 
     const chips = '<div class="meta-chips">' +
       '<span class="chip">' + icon('clock', 12) + ' ' + st.minutes + ' min</span>' +
-      '<span class="chip lime">' + icon('bolt', 12) + ' +60 XP</span>' +
-      '<span class="chip">' + icon(A.timeLabel().icon, 12) + ' ' + A.timeLabel().label + '</span>' +
-      '<span class="chip">' + icon('star', 12) + ' Day ' + day + ' of 21</span>' +
+      '<span class="chip">' + icon('bolt', 12) + ' +60 XP</span>' +
+      (st.dailyTarget ? '<span class="chip">' + icon('star', 12) + ' ' + esc(st.dailyTarget) + '</span>' : '') +
+      (milestone ? '<span class="chip lime">' + icon('trophy', 12) + ' Milestone day</span>' : '') +
       '</div>';
 
     const hero = '<div class="quest-hero" style="--c:' + c.color + ';--c-soft:' + c.colorSoft + '">' +
-      '<span class="quest-daymark">' + String(day).padStart(2, '0') + '</span>' +
+      '<span class="quest-daymark">' + pad(day) + '</span>' +
       '<span class="q-sticker">' + icon(c.icon, 24) + '</span>' +
       '<span class="q-mascot">' + I.mascot(82) + '</span>' +
       '<span class="q-spark a">' + icon('spark', 18) + '</span>' +
@@ -277,63 +295,59 @@
       body = '<div class="quest-complete-card">' +
         '<span class="big-check">' + icon('lock', 22) + '</span>' +
         '<b>Patience, spark.</b>' +
-        '<p>Day ' + day + ' opens when you get there. Today is day ' + A.currentDay() + '. Tally believes in anticipation.</p>' +
+        '<p>Day ' + day + ' opens on ' + A.formatDate(A.dayDate(day), { weekday: 'long', month: 'short', day: 'numeric' }) + '. Today is day ' + A.currentDay() + '.</p>' +
         '</div>' +
-        '<button class="btn btn-cream btn-block" data-go="home">Back to today</button>';
+        '<button type="button" class="btn btn-cream btn-block" data-act="go-home">Back to Home</button>';
     } else if (done) {
       const note = st.notes[day];
       body = '<div class="quest-complete-card">' +
         '<span class="big-check">' + icon('check', 24) + '</span>' +
         '<b>Day ' + day + ' complete</b>' +
-        '<p>+60 XP · ' + A.metrics().streak + '-day streak · logged and dated</p>' +
+        '<p>+60 XP · logged and dated. You cannot mark this day twice.</p>' +
         (note ? '<div class="quest-note-show">“' + esc(note) + '”</div>' : '') +
         '</div>' +
-        '<button class="btn btn-cream btn-block" data-go="home">Back to today</button>' +
-        '<button class="btn btn-ghost btn-block" style="margin-top:8px" data-go="journey">See the journey</button>';
+        '<button type="button" class="btn btn-cream btn-block" data-act="go-home">Back to Home</button>' +
+        '<button type="button" class="btn btn-ghost btn-block" style="margin-top:8px" data-go="journey">See the journey</button>';
     } else {
-      const checks = steps.map(function (step, i) {
-        return '<button class="check-row" data-check="' + i + '" aria-pressed="false">' +
-          '<span class="checkbox">' + icon('check', 13) + '</span>' +
-          '<span class="check-txt"><b>' + esc(step.title) + '</b><small>' + esc(step.sub) + '</small></span>' +
-          '<span class="section-label" style="color:var(--muted-2)">' + step.time + 'm</span>' +
-          '</button>';
-      }).join('');
-
-      body = '<div class="checklist-wrap">' +
-          '<div class="checklist-head"><span class="section-label">The plan</span><span class="check-progress" id="checkProgress">0 / 3</span></div>' +
-          '<div class="checklist">' + checks + '</div>' +
+      body = '<div class="quest-how">' +
+          '<span class="section-label">How to do it</span>' +
+          '<p>' + esc(c.instructions) + '</p>' +
         '</div>' +
 
         '<div class="timer-card">' +
           '<span class="timer-ico">' + icon('clock', 17) + '</span>' +
-          '<div><div class="timer-time" id="timerTime">' + String(st.minutes).padStart(2, '0') + ':00</div><div class="timer-label">Focus timer</div></div>' +
+          '<div><div class="timer-time" id="timerTime">' + String(st.minutes).padStart(2, '0') + ':00</div><div class="timer-label">Optional focus timer</div></div>' +
           '<div class="timer-btns">' +
-            '<button class="mini-btn primary" data-act="timer-toggle" id="timerToggle" aria-label="Start timer">' + icon('play', 15) + '</button>' +
-            '<button class="mini-btn" data-act="timer-reset" aria-label="Reset timer">' + icon('reset', 14) + '</button>' +
+            '<button type="button" class="mini-btn primary" data-act="timer-toggle" id="timerToggle" aria-label="Start timer">' + icon('play', 15) + '</button>' +
+            '<button type="button" class="mini-btn" data-act="timer-reset" aria-label="Reset timer">' + icon('reset', 14) + '</button>' +
           '</div>' +
         '</div>' +
 
-        '<div class="note-wrap"><label class="section-label" for="questNote" style="display:block;margin-bottom:7px">One line about today</label>' +
-          '<textarea class="note" id="questNote" maxlength="160" placeholder="Felt lighter after…">' + esc(st.notes[day] || '') + '</textarea>' +
+        '<div class="note-wrap"><label class="section-label" for="questNote" style="display:block;margin-bottom:7px">Daily reflection <span class="field-optional">optional</span></label>' +
+          '<textarea class="note" id="questNote" maxlength="160" placeholder="One honest line about today…">' + esc(st.notes[day] || '') + '</textarea>' +
         '</div>' +
 
-        '<button class="hold" id="holdBtn" style="--p:0">' +
-          '<span class="hold-fill"></span>' +
-          '<span class="hold-label">' + icon('check', 17) + ' Hold to complete</span>' +
-        '</button>' +
-        '<p class="hold-hint" id="holdHint">Check all 3 steps, then hold for 1 second</p>';
+        (missed ? '<div class="recovery-chip">' + icon('reset', 14) + ' Making up a missed day still counts.</div>' : '') +
+
+        '<button type="button" class="btn btn-primary btn-block complete-task" data-act="complete-day" data-day="' + day + '">' + icon('check', 17) + ' Complete Today’s Task</button>' +
+        '<p class="hold-hint">Completing marks day ' + day + ' once. Your progress saves automatically.</p>';
     }
 
     return '<section class="screen quest">' +
       '<div class="topbar">' +
-        '<button class="icon-btn" data-go="home" aria-label="Back">' + icon('back', 18) + '</button>' +
-        '<span class="topbar-center">Day ' + String(day).padStart(2, '0') + ' / 21</span>' +
-        '<button class="icon-btn" data-act="share" aria-label="Share quest">' + icon('share', 16) + '</button>' +
+        '<button type="button" class="icon-btn" data-act="go-back" aria-label="Back">' + icon('back', 18) + '</button>' +
+        '<span class="topbar-center">Day ' + pad(day) + ' / 21</span>' +
+        '<span class="topbar-spacer"></span>' +
+      '</div>' +
+
+      '<div class="quest-progress-wrap">' +
+        '<div class="quest-progress-top"><span>Day ' + pad(day) + ' of 21</span><b>' + m.done + ' / 21 complete</b></div>' +
+        progress(m.pct) +
       '</div>' +
 
       '<div class="stagger">' +
         hero +
-        '<span class="kicker ' + (c.id === 'mind' ? 'violet' : c.id === 'make' ? 'coral' : '') + '" style="margin-bottom:8px"><span class="dot"></span>' + esc(c.kicker) + ' · ' + (done ? 'complete' : 'today’s quest') + '</span>' +
+        '<span class="kicker" style="margin-bottom:8px"><span class="dot"></span>' + (done ? 'Day complete' : missed ? 'Recovery day' : 'Today’s task') + ' · ' + esc(c.name) + '</span>' +
         '<h1 class="quest-title">' + esc(t.title) + '</h1>' +
         '<p class="quest-desc">' + esc(t.blurb) + '</p>' +
         chips +
@@ -342,29 +356,36 @@
       '</section>';
   }
 
-  /* -------------------------------- finale ------------------------------ */
+  /* ------------------------------- completion --------------------------- */
 
-  function finale(preview) {
-    const m = A.metrics();
-    const complete = m.done >= 21;
-    const days = preview ? 21 : m.done;
-    const xp = preview ? 1680 : m.xp;
-    const mins = preview ? 420 : m.minutes;
-    const best = preview ? 21 : m.bestStreak;
-    const show = preview || complete;
-
-    const grid = [];
-    for (let i = 1; i <= 21; i++) {
-      const on = preview || A.isDone(i);
-      grid.push('<i class="' + (on ? 'on' : '') + '"></i>');
+  function complete(record) {
+    if (!record) {
+      return '<section class="screen finale complete">' +
+        '<div class="topbar"><button type="button" class="icon-btn" data-act="close-complete" aria-label="Close">' + icon('close', 18) + '</button><span class="topbar-center">Completion</span><span class="topbar-spacer"></span></div>' +
+        '<div class="empty-state tall"><h2>That receipt is missing.</h2><p>Return home and choose a completed challenge.</p><button type="button" class="btn btn-primary" data-act="go-home">Go to Home</button></div>' +
+        '</section>';
     }
 
-    return '<section class="screen finale">' +
+    const notes = Object.keys(record.notes || {})
+      .map(function (k) { return parseInt(k, 10); })
+      .filter(function (n) { return record.notes[n]; })
+      .sort(function (a, b) { return a - b; });
+
+    const reflections = notes.length
+      ? notes.map(function (n) {
+          return '<div class="reflection-item"><span class="reflection-day">DAY ' + pad(n) + '</span><p>' + esc(record.notes[n]) + '</p></div>';
+        }).join('')
+      : '<div class="reflection-empty">No reflections were saved. The 21 marks are still the receipt.</div>';
+
+    const grid = [];
+    for (let i = 1; i <= 21; i++) grid.push('<i class="on"></i>');
+
+    return '<section class="screen finale complete">' +
       '<div class="starry" aria-hidden="true"></div>' +
       '<div class="topbar">' +
-        '<button class="icon-btn" data-act="close-finale" aria-label="Close">' + icon(preview ? 'back' : 'close', 18) + '</button>' +
-        '<span class="topbar-center">' + (preview ? 'The view from day 21' : 'The finish line') + '</span>' +
-        '<span style="width:39px"></span>' +
+        '<button type="button" class="icon-btn" data-act="close-complete" aria-label="Back to achievements">' + icon('close', 18) + '</button>' +
+        '<span class="topbar-center">Challenge complete</span>' +
+        '<span class="topbar-spacer"></span>' +
       '</div>' +
 
       '<div class="finale-orb">' +
@@ -375,59 +396,70 @@
       '</div>' +
 
       '<div class="finale-copy">' +
-        '<p class="kicker"><span class="dot"></span> ' + (show ? '21 of 21 days' : 'Not there yet') + '</p>' +
-        '<h1 class="finale-title">You showed up.<em>' + Math.max(days, 1) + ' times.</em></h1>' +
-        '<p>' + (show ? 'Twenty-one days ago this was just a wish. Now it’s a receipt. Tally is quietly losing it.' : 'You’re ' + (21 - m.done) + ' days from this view. One tiny quest at a time.') + '</p>' +
+        '<p class="kicker"><span class="dot"></span> 21 of 21 days</p>' +
+        '<h1 class="finale-title">You showed up.<em>21 times.</em></h1>' +
+        '<p>' + esc(record.name) + ' is finished. Twenty-one days ago it was a wish. Now it is a receipt — and a story you get to keep.</p>' +
       '</div>' +
 
       '<div class="finale-stats">' +
-        '<div class="finale-stat"><b>' + days + '/21</b><span>Days shown up</span></div>' +
-        '<div class="finale-stat"><b>' + xp + '</b><span>XP earned</span></div>' +
-        '<div class="finale-stat"><b>' + mins + '</b><span>Minutes moved</span></div>' +
-        '<div class="finale-stat"><b>' + best + '</b><span>Best streak</span></div>' +
+        '<div class="finale-stat"><b>21/21</b><span>Days completed</span></div>' +
+        '<div class="finale-stat"><b>' + (record.xp || 0) + '</b><span>XP earned</span></div>' +
+        '<div class="finale-stat"><b>' + (record.minutes || 0) + '</b><span>Minutes given</span></div>' +
+        '<div class="finale-stat"><b>' + (record.bestStreak || 21) + '</b><span>Best streak</span></div>' +
+      '</div>' +
+
+      '<div class="completion-dates">' +
+        '<span><b>Started</b>' + A.formatLongDate(A.parseISO(record.startDate)) + '</span>' +
+        '<span><b>Finished</b>' + A.formatLongDate(A.parseISO(record.completedAt)) + '</span>' +
       '</div>' +
 
       '<div class="story-card">' +
-        '<div class="story-top"><span class="story-brand"><i>✦</i> FLARE · 21</span><span>' + (preview ? 'Premonition' : 'Receipt') + '</span></div>' +
-        '<div class="story-title">21 days.<br><em>One receipt.</em></div>' +
+        '<div class="story-top"><span class="story-brand"><i>✦</i> FLARE · 21</span><span>Certificate</span></div>' +
+        '<div class="story-title">' + esc(record.name) + ' <em>21 days.</em></div>' +
         '<div class="story-grid">' + grid.join('') + '</div>' +
-        '<div class="story-foot"><span>Started ' + A.formatDate(A.startDate(), { month: 'short', day: 'numeric' }) + '</span><b>“Small streaks. Dated receipts.”</b></div>' +
+        '<div class="story-foot"><span>' + A.formatShortDate(A.parseISO(record.startDate)) + ' – ' + A.formatShortDate(A.parseISO(record.completedAt)) + '</span><b>“Small actions. Real progress.”</b></div>' +
+      '</div>' +
+
+      '<div class="reflections-card">' +
+        '<div class="card-head"><b>Daily reflections</b><small>' + notes.length + ' saved</small></div>' +
+        '<div class="reflection-list">' + reflections + '</div>' +
       '</div>' +
 
       '<div class="finale-actions">' +
-        '<button class="btn btn-primary btn-block" data-act="share">' + icon('share', 16) + ' Share my receipts</button>' +
-        '<button class="btn btn-ghost btn-block" data-act="new-challenge">Start another 21 ' + icon('arrow', 15) + '</button>' +
-        (preview ? '<button class="btn btn-ghost btn-block" data-act="close-finale">Back to today</button>' : '') +
+        '<button type="button" class="btn btn-primary btn-block" data-act="share-achievement" data-record="' + esc(record.id) + '">' + icon('share', 16) + ' Share Achievement</button>' +
+        '<button type="button" class="btn btn-ghost btn-block" data-act="restart-history" data-record="' + esc(record.id) + '">Start Again ' + icon('arrow', 15) + '</button>' +
+        '<button type="button" class="btn btn-ghost btn-block" data-act="close-complete">Back to Achievements</button>' +
       '</div>' +
-      '<p class="finale-small">' + (preview ? 'Day 21 looks good on you.' : 'We’re proud of you. Obviously.') + '</p>' +
+      '<p class="finale-small">Share creates a real image card and opens your Android share sheet.</p>' +
       '</section>';
   }
 
   /* ------------------------------- celebrate ---------------------------- */
 
-  function celebrate(day, gain) {
+  function celebrate(day, gain, final, recordId) {
     const m = A.metrics();
     const next = 21 - m.done;
     return '<div class="celebrate">' +
       '<div class="celebrate-card">' +
         '<div class="celebrate-mascot">' + I.mascot(96) + '</div>' +
-        '<p class="kicker"><span class="dot"></span> Day ' + String(day).padStart(2, '0') + ' complete</p>' +
-        '<h2>That’s the <em>receipt.</em></h2>' +
-        '<div class="xp-float">' + icon('bolt', 15) + ' +' + (gain || 60) + ' XP</div>' +
-        '<p class="celebrate-sub">' + m.streak + '-day streak · ' + next + ' ritual' + (next === 1 ? '' : 's') + ' to go.<br>Tally will be right here tomorrow.</p>' +
-        '<button class="btn btn-primary" data-act="celebrate-close">Keep the streak ' + icon('arrow', 15) + '</button>' +
-        '<button class="btn btn-ghost" data-act="celebrate-journey">See the journey</button>' +
+        '<p class="kicker"><span class="dot"></span> ' + (final ? '21 of 21 complete' : 'Day ' + pad(day) + ' complete') + '</p>' +
+        '<h2>' + (final ? 'You did the <em>whole thing.</em>' : 'That’s the <em>receipt.</em>') + '</h2>' +
+        '<div class="xp-float">' + icon(final ? 'trophy' : 'bolt', 15) + ' +' + (gain || 60) + ' XP</div>' +
+        '<p class="celebrate-sub">' + (final
+          ? 'Twenty-one days of showing up. Your certificate and reflections are ready.'
+          : m.streak + '-day streak · ' + next + ' ritual' + (next === 1 ? '' : 's') + ' to go.<br>Your progress is saved.') + '</p>' +
+        '<button type="button" class="btn btn-primary" data-act="' + (final ? 'celebrate-finish' : 'celebrate-close') + '"' + (final && recordId ? ' data-record="' + esc(recordId) + '"' : '') + '>' + (final ? 'See your completion' : 'Keep the streak') + ' ' + icon('arrow', 15) + '</button>' +
+        '<button type="button" class="btn btn-ghost" data-act="' + (final ? 'celebrate-close' : 'celebrate-journey') + '">' + (final ? 'Back to Home' : 'See the journey') + '</button>' +
       '</div>' +
       '</div>';
   }
 
   Object.assign(window.S, {
     journey: journey,
-    stats: stats,
-    you: you,
+    achievements: achievements,
+    profile: profile,
     quest: quest,
-    finale: finale,
+    complete: complete,
     celebrate: celebrate,
-    dayRow: dayRow,
   });
 })();

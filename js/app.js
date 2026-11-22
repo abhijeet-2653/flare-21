@@ -1,4 +1,4 @@
-/* FLARE — router, interactions, timers, hold-to-complete */
+/* FLARE — router, interactions, timers, completion */
 (function () {
   const A = window.App;
   const S = window.S;
@@ -7,189 +7,312 @@
   const app = document.getElementById('app');
   const overlay = document.getElementById('overlay');
 
-  const NAV_SCREENS = { home: 1, journey: 1, stats: 1, you: 1 };
+  const NAV_SCREENS = { home: 1, achievements: 1, profile: 1 };
 
-  let screen = 'welcome';
-  let setup = { step: 1, draft: null, returnTo: 'welcome' };
-  let questDay = null;
+  let screen = 'home';
+  const route = { categoryId: null, programId: null, historyId: null, day: null };
+  let setupProgram = null;
+  let setupDraft = null;
+  let setupStep = 1;
+  let setupReturn = 'home';
+  let customDraft = null;
   let questReturn = 'home';
-  let checks = [false, false, false];
   let justCompleted = null;
-  let finalePreview = false;
-  let timer = { secs: 0, total: 0, running: false, id: null, day: null };
+  let lastRecordId = null;
   let resetTimerId = null;
+  let abandonTimerId = null;
+  let timer = { secs: 0, total: 0, running: false, id: null, day: null };
 
   /* ------------------------------- boot -------------------------------- */
 
   function boot() {
-    if (location.hash === '#demo' && !A.state.onboarded) seedDemo();
-    screen = A.state.onboarded ? 'home' : 'welcome';
+    if (A.hasActive() && A.state.completed.length >= 21) {
+      A.archiveCurrent();
+    }
     document.body.classList.toggle('reduce', !A.state.motion);
+    screen = 'home';
     render();
+    syncReminders({ requestPermission: false });
   }
 
   function activeNav() {
-    return screen === 'quest' ? 'home' : screen;
+    if (screen === 'home') return 'home';
+    if (screen === 'achievements') return 'achievements';
+    if (screen === 'profile') return 'profile';
+    return '';
   }
 
   function render() {
-    if (!setup.draft) makeDraft(null);
     view.innerHTML = markup();
     nav.innerHTML = S.nav(activeNav());
     nav.hidden = !NAV_SCREENS[screen];
     app.classList.toggle('nonav', !NAV_SCREENS[screen]);
     document.body.classList.toggle('reduce', !A.state.motion);
-    if (screen === 'setup') updateNext();
 
-    if (screen === 'quest') {
-      bindHold();
-      updateCheckUI();
-      renderTimer();
-    }
+    if (screen === 'quest') renderTimer();
 
     if (justCompleted) {
       const info = justCompleted;
       justCompleted = null;
-      overlay.innerHTML = S.celebrate(info.day, info.gain);
+      if (info.recordId) lastRecordId = info.recordId;
+      overlay.innerHTML = S.celebrate(info.day, info.gain, info.final, info.recordId);
       requestAnimationFrame(function () {
-        A.burst({ count: 120, power: 1.15, y: app.clientHeight * 0.46 });
+        A.burst({ count: info.final ? 140 : 110, power: info.final ? 1.2 : 1.05, y: app.clientHeight * 0.44 });
       });
+    } else if (screen === 'complete') {
+      /* The certificate screen already carries its own print texture; keep it readable. */
+      overlay.innerHTML = '';
     } else {
       overlay.innerHTML = '';
-    }
-
-    if (screen === 'finale') {
-      requestAnimationFrame(function () {
-        A.burst({ count: 140, power: 1.2, y: app.clientHeight * 0.34 });
-      });
     }
   }
 
   function markup() {
     switch (screen) {
-      case 'welcome': return S.welcome();
-      case 'setup': return S.setup(setup.step, setup.draft);
+      case 'explore': return S.explore(route.categoryId);
+      case 'detail': {
+        const p = A.DATA.getProgram(route.programId);
+        return p ? S.detail(p) : S.home();
+      }
+      case 'custom':
+        if (!customDraft) customDraft = { name: '', task: '', minutes: 20, difficulty: 'Easy' };
+        return S.custom(customDraft);
+      case 'setup': return (setupDraft && setupProgram) ? S.setup(setupStep, setupDraft, setupProgram) : S.home();
+      case 'quest': return S.quest(route.day);
       case 'journey': return S.journey();
-      case 'stats': return S.stats();
-      case 'you': return S.you();
-      case 'quest': return S.quest(questDay);
-      case 'finale': return S.finale(finalePreview);
+      case 'achievements': return S.achievements();
+      case 'profile': return S.profile();
+      case 'complete': return S.complete(A.findHistory(route.historyId));
       case 'home':
       default: return S.home();
     }
   }
 
-  function navigate(name) {
-    if (name === screen && name !== 'quest') return;
-    if (name === 'finale') finalePreview = false;
-    screen = name;
-    view.scrollTop = 0;
+  function navigate(name, opts) {
+    opts = opts || {};
     if (name !== 'quest') stopTimer();
-    if (name !== 'finale') finalePreview = false;
-    render();
-  }
-
-  /* ------------------------------- setup ------------------------------- */
-
-  function makeDraft(existing) {
-    const st = A.state;
-    setup.draft = {
-      challengeId: existing ? st.challengeId || null : null,
-      customGoal: existing ? st.customGoal || '' : '',
-      minutes: existing ? st.minutes || 20 : 20,
-      timeOfDay: existing ? st.timeOfDay || 'sunrise' : 'sunrise',
-      reminder: existing ? st.reminder !== false : true,
-      name: existing ? st.name || '' : '',
-    };
-  }
-
-  function startSetup(existing) {
-    makeDraft(existing);
-    setup.step = 1;
-    setup.returnTo = existing ? 'you' : 'welcome';
-    finalePreview = false;
-    screen = 'setup';
+    screen = name;
+    if (name === 'explore' && opts.categoryId) route.categoryId = opts.categoryId;
+    if (name === 'detail' && opts.programId) route.programId = opts.programId;
+    if (name === 'complete' && opts.historyId) route.historyId = opts.historyId;
     view.scrollTop = 0;
     render();
   }
 
-  function validStep() {
-    if (setup.step !== 1) return true;
-    const d = setup.draft;
-    if (!d.challengeId) return false;
-    if (d.challengeId === 'custom' && d.customGoal.trim().length < 2) return false;
-    return true;
+  function back() {
+    if (screen === 'quest') { navigate(questReturn || 'home'); return; }
+    if (screen === 'setup') {
+      if (setupStep > 1) {
+        setupStep = 1;
+        view.scrollTop = 0;
+        render();
+      } else if (setupReturn === 'custom') {
+        navigate('custom');
+      } else if (setupReturn === 'detail' && setupProgram && setupProgram.id !== 'custom') {
+        route.categoryId = setupProgram.categoryId;
+        route.programId = setupProgram.id;
+        navigate('detail', { programId: setupProgram.id });
+      } else {
+        navigate('home');
+      }
+      return;
+    }
+    if (screen === 'detail') {
+      const p = A.DATA.getProgram(route.programId);
+      navigate('explore', { categoryId: p ? p.categoryId : route.categoryId });
+      return;
+    }
+    if (screen === 'explore' || screen === 'custom' || screen === 'journey' || screen === 'complete') {
+      navigate('home');
+      return;
+    }
+    if (screen === 'achievements' || screen === 'profile') {
+      navigate('home');
+      return;
+    }
+    if (screen === 'home') return;
   }
 
-  function updateNext() {
-    const btn = view.querySelector('[data-act="step-next"]');
-    if (btn) btn.disabled = !validStep();
-  }
-
-  function lockIn() {
-    const d = setup.draft;
-    const st = A.state;
-    st.onboarded = true;
-    st.name = (d.name || '').trim();
-    st.challengeId = d.challengeId;
-    st.customGoal = d.challengeId === 'custom' ? d.customGoal.trim() : '';
-    st.minutes = d.minutes;
-    st.timeOfDay = d.timeOfDay;
-    st.reminder = d.reminder;
-    st.startDate = A.iso(A.today());
-    st.completed = [];
-    st.notes = {};
-    A.save();
-    screen = 'home';
-    view.scrollTop = 0;
-    render();
-    A.chime('done');
-    A.buzz([18, 40, 18]);
-    A.burst({ count: 110, power: 1.05, y: app.clientHeight * 0.4 });
-    A.toast('Twenty-one days starts now', 'spark');
-  }
-
-  /* ------------------------------- demo -------------------------------- */
-
-  function seedDemo() {
-    const st = A.state;
-    st.onboarded = true;
-    st.name = 'Aarav';
-    st.challengeId = 'move';
-    st.customGoal = '';
-    st.minutes = 20;
-    st.timeOfDay = 'sunrise';
-    st.reminder = true;
-    st.startDate = A.iso(new Date(A.today().getTime() - 5 * 86400000));
-    st.completed = [1, 2, 3, 5];
-    st.notes = { 3: 'Felt lighter after the walk. Weirdly proud.' };
-    A.save();
-  }
-
-  function demo() {
-    seedDemo();
-    screen = 'home';
-    view.scrollTop = 0;
-    render();
-    A.toast('Demo mode — five days in', 'spark');
-  }
-
-  /* -------------------------------- quest ------------------------------ */
+  /* --------------------------- challenge flows -------------------------- */
 
   function openDay(n) {
-    if (!n) return;
+    if (!A.hasActive()) {
+      A.toast('Start a challenge first', 'spark');
+      return;
+    }
+    if (!n) n = A.currentDay();
     if (n > A.currentDay()) {
-      A.toast('Day ' + n + ' unlocks when you get there', 'lock');
+      A.toast('Day ' + n + ' unlocks on ' + A.formatDate(A.dayDate(n), { month: 'short', day: 'numeric' }), 'lock');
       return;
     }
     questReturn = screen === 'journey' ? 'journey' : 'home';
-    questDay = n;
-    checks = [false, false, false];
+    route.day = n;
+    stopTimer();
     resetTimerState(n);
     screen = 'quest';
     view.scrollTop = 0;
     render();
   }
+
+  function openSetup(program, opts) {
+    if (!program) return;
+    if (A.hasActive()) {
+      A.toast('One challenge at a time. Finish it or leave it from Profile.', 'lock');
+      navigate('home');
+      return;
+    }
+    opts = opts || {};
+    setupProgram = program;
+    setupStep = 1;
+    setupReturn = opts.returnTo || 'home';
+    setupDraft = {
+      key: program.id,
+      categoryId: program.categoryId,
+      name: A.state.name || '',
+      startDate: A.iso(A.today()),
+      dailyTarget: opts.dailyTarget || '',
+      reminder: A.state.reminder !== false,
+      reminderTime: A.state.reminderTime || '08:00',
+      minutes: program.minutes || A.state.minutes || 20,
+      difficulty: program.difficulty || 'Easy',
+      customGoal: program.id === 'custom' ? program.name : '',
+      customTask: program.id === 'custom' ? program.tagline : '',
+    };
+    navigate('setup');
+  }
+
+  function makeCustomProgram(d) {
+    const name = d.name.trim();
+    const task = d.task.trim();
+    return {
+      id: 'custom',
+      categoryId: 'custom',
+      name: name,
+      tagline: task || ('21 days of ' + name),
+      description: task
+        ? task + ' Every day for 21 days, in a version small enough to repeat.'
+        : 'Twenty-one days of ' + name + '. Made up as you go.',
+      color: '#E3A11C',
+      colorSoft: 'rgba(227,161,28,.18)',
+      icon: 'spark',
+      kicker: 'For you',
+      minutes: d.minutes,
+      difficulty: d.difficulty,
+      targetHint: 'optional daily note',
+      benefits: [
+        'Built around something you actually care about',
+        'You choose the size of the daily step',
+        'A simple record of 21 days of trying',
+      ],
+      instructions: task || 'Do the smallest version of ' + name + ' today. Small enough that a bad day cannot stop you.',
+      tasks: A.DATA.customTasks(name, d.minutes),
+    };
+  }
+
+  function startChallenge() {
+    if (!setupDraft || !setupProgram) return;
+    const d = setupDraft;
+    const p = setupProgram;
+    let start = d.startDate ? A.parseISO(d.startDate) : A.today();
+    if (start.getTime() > A.today().getTime()) start = A.today();
+    const st = A.state;
+    st.onboarded = true;
+    st.name = (d.name || '').trim();
+    st.challengeKey = d.key;
+    st.challengeId = d.key === 'custom' ? 'custom' : p.categoryId;
+    st.categoryId = p.categoryId;
+    st.customGoal = d.key === 'custom' ? (d.customGoal || p.name) : '';
+    st.customTask = d.key === 'custom' ? (d.customTask || p.tagline) : '';
+    st.challengeName = p.name;
+    st.challengeTagline = p.tagline;
+    st.difficulty = p.difficulty || d.difficulty || 'Easy';
+    st.minutes = d.minutes || p.minutes || 20;
+    st.dailyTarget = (d.dailyTarget || '').trim();
+    st.startDate = A.iso(start);
+    st.completed = [];
+    st.notes = {};
+    st.reminder = !!d.reminder;
+    st.reminderTime = d.reminderTime || '08:00';
+    st.timeOfDay = A.timeOfDayFor(st.reminderTime);
+    A.save();
+    syncReminders({ requestPermission: true });
+
+    screen = 'home';
+    view.scrollTop = 0;
+    render();
+    A.chime('done');
+    A.buzz([18, 40, 18]);
+    A.toast('Your 21 days start now', 'spark');
+  }
+
+  function completeDay(day) {
+    if (!A.hasActive()) {
+      A.toast('No active challenge', 'spark');
+      return;
+    }
+    day = parseInt(day, 10);
+    if (!day) day = route.day;
+    if (!day || A.isDone(day)) {
+      A.toast('Day ' + day + ' is already complete', 'check');
+      return;
+    }
+    if (day > A.currentDay()) {
+      A.toast('That day has not started yet', 'lock');
+      return;
+    }
+
+    const before = A.metrics().xp;
+    const noteEl = document.getElementById('questNote');
+    if (noteEl) {
+      const value = noteEl.value.trim();
+      if (value) A.state.notes[day] = value;
+      else delete A.state.notes[day];
+    }
+
+    A.state.completed = Array.from(new Set(A.state.completed.concat([day]))).sort(function (a, b) { return a - b; });
+    A.save();
+    const gain = A.metrics().xp - before;
+    syncReminders({ requestPermission: false });
+
+    stopTimer();
+    A.chime('done');
+    A.buzz([20, 45, 30]);
+
+    if (A.state.completed.length >= 21) {
+      const record = A.archiveCurrent();
+      lastRecordId = record ? record.id : null;
+      justCompleted = { day: day, gain: gain, final: true, recordId: lastRecordId };
+      screen = 'home';
+      view.scrollTop = 0;
+      render();
+    } else {
+      justCompleted = { day: day, gain: gain, final: false };
+      render();
+    }
+  }
+
+  function abandonCurrent() {
+    const st = A.state;
+    st.challengeId = null;
+    st.challengeKey = null;
+    st.categoryId = null;
+    st.challengeName = '';
+    st.challengeTagline = '';
+    st.customGoal = '';
+    st.customTask = '';
+    st.difficulty = '';
+    st.startDate = null;
+    st.completed = [];
+    st.notes = {};
+    st.dailyTarget = '';
+    A.abandonArmed = false;
+    A.save();
+    syncReminders({ requestPermission: false });
+    navigate('home');
+    A.toast('Challenge left. Your next 21 is ready when you are.', 'spark');
+  }
+
+  /* ------------------------------- timer -------------------------------- */
 
   function resetTimerState(day) {
     clearInterval(timer.id);
@@ -201,7 +324,7 @@
   }
 
   function startTimer() {
-    if (!timer.day) resetTimerState(questDay);
+    if (!timer.day) resetTimerState(route.day);
     if (timer.running) return;
     if (timer.secs <= 0) timer.secs = timer.total;
     timer.running = true;
@@ -246,264 +369,127 @@
     return String(Math.floor(secs / 60)).padStart(2, '0') + ':' + String(secs % 60).padStart(2, '0');
   }
 
-  function allChecked() {
-    return checks.every(Boolean);
+  /* ----------------------------- reminders ------------------------------ */
+
+  function syncReminders(opts) {
+    if (!window.FLARE_NOTIFY) return;
+    const st = A.state;
+    const c = A.hasActive() ? A.challenge() : null;
+    window.FLARE_NOTIFY.sync({
+      active: !!c,
+      reminder: st.reminder,
+      reminderTime: st.reminderTime,
+      startDate: st.startDate,
+      completed: st.completed,
+      tasks: c ? c.tasks.map(function (t) { return t[0]; }) : [],
+      challengeName: c ? c.name : '',
+      requestPermission: !!(opts && opts.requestPermission),
+    });
   }
 
-  function updateCheckUI() {
-    const count = checks.filter(Boolean).length;
-    const prog = document.getElementById('checkProgress');
-    if (prog) {
-      prog.textContent = count + ' / 3';
-      prog.classList.toggle('all', count === 3);
-    }
-    const hint = document.getElementById('holdHint');
-    if (hint) {
-      hint.textContent = count === 3
-        ? 'Now hold for 1 second — make it official'
-        : 'Check all 3 steps, then hold for 1 second';
-    }
-    const hold = document.getElementById('holdBtn');
-    if (hold) hold.classList.toggle('ready', count === 3);
-  }
+  /* ------------------------------ actions ------------------------------- */
 
-  function toggleCheck(i) {
-    if (i < 0 || i > 2) return;
-    checks[i] = !checks[i];
-    const rows = view.querySelectorAll('[data-check]');
-    if (rows[i]) {
-      rows[i].classList.toggle('on', checks[i]);
-      rows[i].setAttribute('aria-pressed', checks[i] ? 'true' : 'false');
+  async function shareAchievement(id) {
+    const record = id ? A.findHistory(id) : A.findHistory(lastRecordId);
+    if (!record) {
+      A.toast('Completion not found', 'close');
+      return;
     }
-    updateCheckUI();
-    A.buzz(8);
-  }
-
-  function bindHold() {
-    const el = document.getElementById('holdBtn');
-    if (!el) return;
-    let rafId = null;
-    let start = 0;
-    let active = false;
-    const DUR = 1000;
-
-    function frame() {
-      const p = Math.min(1, (performance.now() - start) / DUR);
-      el.style.setProperty('--p', p.toFixed(3));
-      if (p >= 1) {
-        cleanup();
-        el.classList.add('done');
-        el.style.setProperty('--p', '1');
-        completeDay(questDay);
+    if (!window.FLARE_SHARE) {
+      A.toast('Sharing is unavailable on this device', 'close');
+      return;
+    }
+    A.buzz(10);
+    try {
+      const result = await window.FLARE_SHARE.shareCompletion(record);
+      if (result && result.cancelled) return;
+      if (result && result.ok) {
+        A.toast(result.downloaded ? 'Completion card downloaded' : 'Share sheet opened', 'share');
       } else {
-        rafId = requestAnimationFrame(frame);
+        A.toast('Could not share the card', 'close');
       }
+    } catch (err) {
+      A.toast('Could not share the card', 'close');
     }
-
-    function cleanup() {
-      active = false;
-      if (rafId) cancelAnimationFrame(rafId);
-      rafId = null;
-      el.classList.remove('holding');
-    }
-
-    function down(e) {
-      if (el.dataset.done === '1') return;
-      if (!allChecked()) {
-        A.toast('Check all 3 steps first', 'check');
-        A.buzz(24);
-        return;
-      }
-      e.preventDefault();
-      active = true;
-      start = performance.now();
-      el.classList.add('holding');
-      el.style.setProperty('--p', '0.001');
-      A.buzz(10);
-      try { el.setPointerCapture(e.pointerId); } catch (err) {}
-      frame();
-    }
-
-    function up() {
-      if (!active) return;
-      cleanup();
-      el.style.setProperty('--p', '0');
-    }
-
-    el.addEventListener('pointerdown', down);
-    el.addEventListener('pointerup', up);
-    el.addEventListener('pointercancel', up);
-    el.addEventListener('pointerleave', up);
-    el.addEventListener('contextmenu', function (e) { e.preventDefault(); });
-    el.addEventListener('keydown', function (e) {
-      if (e.key !== ' ' && e.key !== 'Enter') return;
-      e.preventDefault();
-      if (e.repeat) return;
-      down(e);
-    });
-    el.addEventListener('keyup', function (e) {
-      if (e.key !== ' ' && e.key !== 'Enter') return;
-      e.preventDefault();
-      up();
-    });
   }
 
-  function completeDay(day) {
-    if (!day || A.isDone(day)) return;
-    const before = A.metrics().xp;
-    const noteEl = document.getElementById('questNote');
-    const note = noteEl ? noteEl.value.trim() : (A.state.notes[day] || '');
-    if (note) A.state.notes[day] = note;
-    else delete A.state.notes[day];
-
-    A.state.completed.push(day);
-    A.state.completed.sort(function (a, b) { return a - b; });
-    A.save();
-    const gain = A.metrics().xp - before;
-
-    stopTimer();
-    A.chime('done');
-    A.buzz([20, 45, 30]);
-    justCompleted = { day: day, gain: gain };
-    render();
+  function restartHistory(id) {
+    const r = A.findHistory(id);
+    if (!r) return;
+    if (r.key === 'custom') {
+      openCustom({ name: r.name, task: r.tagline, minutes: r.minutes || 20, difficulty: r.difficulty || 'Easy' });
+      return;
+    }
+    const p = A.DATA.getProgram(r.key);
+    if (!p) {
+      A.toast('This challenge is no longer available', 'close');
+      return;
+    }
+    openSetup(p, { returnTo: 'achievements', dailyTarget: r.dailyTarget || '' });
   }
 
-  /* ------------------------------ actions ------------------------------ */
+  function openCustom(prefill) {
+    customDraft = Object.assign({ name: '', task: '', minutes: 20, difficulty: 'Easy' }, prefill || {});
+    navigate('custom');
+  }
+
+  function goTo(name) {
+    if (name === 'custom') { openCustom(); return; }
+    navigate(name);
+  }
 
   function handleAction(act, el) {
     switch (act) {
-      case 'start':
-        startSetup(null);
+      case 'go-back':
+        back();
         break;
-      case 'demo':
-        demo();
-        break;
-      case 'exit-setup':
-        screen = setup.returnTo || 'welcome';
-        view.scrollTop = 0;
-        render();
-        break;
-      case 'step-back':
-        if (setup.step > 1) {
-          setup.step--;
-          view.scrollTop = 0;
-          render();
-        } else {
-          screen = setup.returnTo || 'welcome';
-          view.scrollTop = 0;
-          render();
-        }
-        break;
-      case 'step-next':
-        if (!validStep()) {
-          A.toast('Pick your challenge first', 'spark');
-          return;
-        }
-        if (setup.step < 4) {
-          setup.step++;
-          view.scrollTop = 0;
-          render();
-        } else {
-          lockIn();
-        }
-        break;
-      case 'pick': {
-        const id = el.dataset.id;
-        setup.draft.challengeId = id;
-        view.querySelectorAll('[data-pick]').forEach(function (p) {
-          p.classList.toggle('sel', p.dataset.id === id);
-        });
-        const field = document.getElementById('customField');
-        if (field) field.classList.toggle('hide', id !== 'custom');
-        if (id === 'custom') {
-          setTimeout(function () {
-            const input = document.getElementById('customGoal');
-            if (input) input.focus();
-          }, 60);
-        }
-        updateNext();
-        A.buzz(6);
-        break;
-      }
-      case 'preset':
-        setMinutes(parseInt(el.dataset.min, 10));
-        break;
-      case 'time': {
-        setup.draft.timeOfDay = el.dataset.time;
-        view.querySelectorAll('[data-time]').forEach(function (t) {
-          t.classList.toggle('sel', t.dataset.time === setup.draft.timeOfDay);
-        });
-        A.buzz(6);
-        break;
-      }
-      case 'toggle-reminder':
-        setup.draft.reminder = !setup.draft.reminder;
-        el.setAttribute('aria-pressed', setup.draft.reminder ? 'true' : 'false');
-        break;
-      case 'jump-today': {
-        const row = view.querySelector('.day-row[data-open-day="' + A.currentDay() + '"]');
-        if (row) row.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        break;
-      }
-      case 'celebrate-close':
-        overlay.innerHTML = '';
+      case 'go-home':
         navigate('home');
         break;
-      case 'celebrate-journey':
-        overlay.innerHTML = '';
-        navigate('journey');
+      case 'browse':
+        if (screen !== 'home') navigate('home');
+        requestAnimationFrame(function () {
+          const grid = document.querySelector('.cat-grid');
+          if (grid) grid.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        });
         break;
-      case 'share':
-        A.burst({ count: 70, power: 0.9, y: app.clientHeight * 0.45 });
-        A.toast('Story card saved to your highlights ✦', 'share');
+      case 'continue':
+        openDay(A.currentDay());
         break;
-      case 'change-goal':
-        startSetup(A.state);
+      case 'choose-program':
+        openSetup(A.DATA.getProgram(el.dataset.id), { returnTo: 'detail' });
         break;
-      case 'preview-finale':
-        finalePreview = true;
-        screen = 'finale';
-        view.scrollTop = 0;
-        render();
-        break;
-      case 'close-finale':
-        finalePreview = false;
-        screen = 'home';
-        view.scrollTop = 0;
-        render();
-        break;
-      case 'go-finale':
-        finalePreview = false;
-        screen = 'finale';
-        view.scrollTop = 0;
-        render();
-        break;
-      case 'new-challenge':
-        finalePreview = false;
-        startSetup(null);
-        break;
-      case 'next-day':
-        skipDay();
-        break;
-      case 'reset':
-        if (A.resetArmed) {
-          clearTimeout(resetTimerId);
-          stopTimer();
-          A.reset();
-          screen = 'welcome';
-          view.scrollTop = 0;
-          render();
-          A.toast('Clean slate. Fresh spark.', 'spark');
-        } else {
-          A.resetArmed = true;
-          render();
-          A.toast('Tap reset again to erase everything', 'close');
-          clearTimeout(resetTimerId);
-          resetTimerId = setTimeout(function () {
-            A.resetArmed = false;
-            if (screen === 'you') render();
-          }, 4500);
+      case 'custom-continue':
+        if (!customDraft || customDraft.name.trim().length < 2) {
+          A.toast('Give your challenge a name first', 'spark');
+          return;
         }
+        openSetup(makeCustomProgram(customDraft), { returnTo: 'custom' });
+        break;
+      case 'custom-difficulty': {
+        const value = el.dataset.value;
+        customDraft.difficulty = value;
+        view.querySelectorAll('.diff-pick').forEach(function (b) {
+          b.classList.toggle('sel', b.dataset.value === value);
+        });
+        A.buzz(5);
+        break;
+      }
+      case 'setup-toggle-reminder': {
+        setupDraft.reminder = !setupDraft.reminder;
+        el.setAttribute('aria-pressed', setupDraft.reminder ? 'true' : 'false');
+        const timeInput = document.getElementById('reminderTime');
+        if (timeInput) timeInput.disabled = !setupDraft.reminder;
+        A.buzz(5);
+        break;
+      }
+      case 'setup-next':
+        setupStep = 2;
+        view.scrollTop = 0;
+        render();
+        break;
+      case 'start-challenge':
+        startChallenge();
         break;
       case 'timer-toggle':
         if (timer.running) pauseTimer();
@@ -514,59 +500,115 @@
         timer.secs = timer.total;
         renderTimer();
         break;
+      case 'complete-day':
+        completeDay(el.dataset.day);
+        break;
+      case 'celebrate-close':
+        overlay.innerHTML = '';
+        A.clearConfetti();
+        navigate('home');
+        break;
+      case 'celebrate-journey':
+        overlay.innerHTML = '';
+        A.clearConfetti();
+        navigate('journey');
+        break;
+      case 'celebrate-finish': {
+        const id = el.dataset.record || lastRecordId;
+        overlay.innerHTML = '';
+        A.clearConfetti();
+        if (id && A.findHistory(id)) navigate('complete', { historyId: id });
+        else navigate('achievements');
+        break;
+      }
+      case 'close-complete':
+        navigate('achievements');
+        break;
+      case 'share-achievement':
+        shareAchievement(el.dataset.record);
+        break;
+      case 'restart-history':
+        restartHistory(el.dataset.record);
+        break;
+      case 'jump-today':
+        requestAnimationFrame(function () {
+          const cell = document.querySelector('.cal-day.is-today');
+          if (cell) cell.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        });
+        break;
+      case 'abandon-challenge':
+        if (A.abandonArmed) {
+          clearTimeout(abandonTimerId);
+          abandonCurrent();
+        } else {
+          A.abandonArmed = true;
+          render();
+          A.toast('Tap again to leave this challenge', 'reset');
+          clearTimeout(abandonTimerId);
+          abandonTimerId = setTimeout(function () {
+            A.abandonArmed = false;
+            if (screen === 'profile') render();
+          }, 4500);
+        }
+        break;
+      case 'reset':
+        if (A.resetArmed) {
+          clearTimeout(resetTimerId);
+          stopTimer();
+          A.reset();
+          syncReminders({ requestPermission: false });
+          screen = 'home';
+          view.scrollTop = 0;
+          render();
+          A.toast('Clean slate. Fresh spark.', 'spark');
+        } else {
+          A.resetArmed = true;
+          render();
+          A.toast('Tap reset again to erase everything', 'close');
+          clearTimeout(resetTimerId);
+          resetTimerId = setTimeout(function () {
+            A.resetArmed = false;
+            if (screen === 'profile') render();
+          }, 4500);
+        }
+        break;
+      case 'export-backup':
+        if (window.FLARE_BACKUP) {
+          window.FLARE_BACKUP.exportBackup(A.state).then(function (res) {
+            if (res && res.ok) A.toast(res.downloaded ? 'Backup downloaded' : 'Backup shared', 'download');
+            else if (!res || !res.cancelled) A.toast('Could not save the backup', 'close');
+          }).catch(function () {
+            A.toast('Could not save the backup', 'close');
+          });
+        }
+        break;
+      case 'import-backup': {
+        const input = document.getElementById('importFile');
+        if (input) input.click();
+        break;
+      }
       default:
         break;
     }
   }
 
-  function setMinutes(min) {
-    setup.draft.minutes = min;
-    const range = document.getElementById('minutesRange');
-    if (range) {
-      range.value = min;
-      range.style.setProperty('--fill', ((min - 5) / 55) * 100 + '%');
-    }
-    const num = document.getElementById('minutesNum');
-    if (num) num.textContent = min;
-    const vibe = document.getElementById('vibeLabel');
-    if (vibe) vibe.textContent = S.vibe(min);
-    const note = document.getElementById('timeNote');
-    if (note) {
-      const hrs = ((min * 21) / 60).toFixed(1).replace('.0', '');
-      note.innerHTML = A.icon('clock', 17) + '<span><b>' + hrs + ' hours</b> of showing up over 21 days. Small price for a new default.</span>';
-    }
-    view.querySelectorAll('[data-act="preset"]').forEach(function (p) {
-      p.classList.toggle('sel', parseInt(p.dataset.min, 10) === min);
-    });
-    A.buzz(5);
-  }
-
-  function skipDay() {
-    const st = A.state;
-    if (!st.startDate) return;
-    if (A.currentDay() >= 21) {
-      A.toast('Already at the finish line', 'trophy');
-      return;
-    }
-    const d = A.parseISO(st.startDate);
-    d.setDate(d.getDate() - 1);
-    st.startDate = A.iso(d);
-    A.save();
-    A.toast('Fast-forwarded to day ' + A.currentDay(), 'clock');
-    render();
-  }
-
-  /* ------------------------------- events ------------------------------ */
+  /* ------------------------------- events ------------------------------- */
 
   view.addEventListener('click', function (e) {
     const go = e.target.closest('[data-go]');
-    if (go) { navigate(go.dataset.go); return; }
+    if (go) { goTo(go.dataset.go); return; }
+
+    const category = e.target.closest('[data-category]');
+    if (category) { navigate('explore', { categoryId: category.dataset.category }); return; }
+
+    const program = e.target.closest('[data-program]');
+    if (program) { navigate('detail', { programId: program.dataset.program }); return; }
+
+    const history = e.target.closest('[data-history]');
+    if (history) { navigate('complete', { historyId: history.dataset.history }); return; }
 
     const open = e.target.closest('[data-open-day]');
     if (open) { openDay(parseInt(open.dataset.openDay, 10)); return; }
-
-    const check = e.target.closest('[data-check]');
-    if (check) { toggleCheck(parseInt(check.dataset.check, 10)); return; }
 
     const toggle = e.target.closest('[data-toggle]');
     if (toggle) {
@@ -575,6 +617,7 @@
       A.save();
       toggle.setAttribute('aria-pressed', A.state[key] ? 'true' : 'false');
       document.body.classList.toggle('reduce', !A.state.motion);
+      if (key === 'reminder') syncReminders({ requestPermission: true });
       if (key === 'motion' && !A.state.motion) A.toast('Motion turned way down', 'wave');
       return;
     }
@@ -590,39 +633,85 @@
 
   nav.addEventListener('click', function (e) {
     const go = e.target.closest('[data-go]');
-    if (go) navigate(go.dataset.go);
+    if (go) goTo(go.dataset.go);
   });
 
   view.addEventListener('input', function (e) {
     const id = e.target.id;
-    if (id === 'minutesRange') {
-      setMinutes(parseInt(e.target.value, 10));
-    } else if (id === 'customGoal') {
-      setup.draft.customGoal = e.target.value;
-      updateNext();
-    } else if (id === 'nameInput') {
-      setup.draft.name = e.target.value;
-    } else if (id === 'questNote' && questDay) {
+    if (id === 'questNote' && route.day) {
       const value = e.target.value.trim();
-      if (value) A.state.notes[questDay] = value;
-      else delete A.state.notes[questDay];
+      if (value) A.state.notes[route.day] = value;
+      else delete A.state.notes[route.day];
       A.save();
+    } else if (id === 'setupName' && setupDraft) {
+      setupDraft.name = e.target.value;
+    } else if (id === 'dailyTarget' && setupDraft) {
+      setupDraft.dailyTarget = e.target.value;
+    } else if (id === 'startDate' && setupDraft) {
+      setupDraft.startDate = e.target.value;
+    } else if (id === 'reminderTime' && setupDraft) {
+      setupDraft.reminderTime = e.target.value;
+    } else if (id === 'customName' && customDraft) {
+      customDraft.name = e.target.value;
+    } else if (id === 'customTask' && customDraft) {
+      customDraft.task = e.target.value;
+    } else if (id === 'customMinutes' && customDraft) {
+      customDraft.minutes = parseInt(e.target.value, 10);
+      const num = document.getElementById('customMinutesNum');
+      if (num) num.textContent = customDraft.minutes;
+      e.target.style.setProperty('--fill', ((customDraft.minutes - 5) / 55) * 100 + '%');
+    } else if (id === 'profileName') {
+      A.state.name = e.target.value;
+      A.save();
+    }
+  });
+
+  view.addEventListener('change', function (e) {
+    const id = e.target.id;
+    if (id === 'profileReminderTime') {
+      A.state.reminderTime = e.target.value || '08:00';
+      A.state.timeOfDay = A.timeOfDayFor(A.state.reminderTime);
+      A.save();
+      syncReminders({ requestPermission: true });
+      A.toast('Reminder set for ' + A.reminderLabel(), 'bell');
+    } else if (id === 'reminderTime' && setupDraft) {
+      setupDraft.reminderTime = e.target.value || '08:00';
+    } else if (id === 'startDate' && setupDraft) {
+      setupDraft.startDate = e.target.value;
+    } else if (id === 'importFile') {
+      const file = e.target.files && e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = function () {
+        try {
+          const raw = window.FLARE_BACKUP.parse(reader.result);
+          A.replaceState(raw);
+          syncReminders({ requestPermission: false });
+          screen = 'home';
+          view.scrollTop = 0;
+          render();
+          A.toast('Backup restored', 'check');
+        } catch (err) {
+          A.toast('That file is not a FLARE backup', 'close');
+        }
+      };
+      reader.onerror = function () { A.toast('Could not read that file', 'close'); };
+      reader.readAsText(file);
+      e.target.value = '';
     }
   });
 
   view.addEventListener('keydown', function (e) {
     if (e.key !== 'Enter' && e.key !== ' ') return;
-    const row = e.target.closest('.day-row[data-open-day]');
-    if (row) {
+    const card = e.target.closest('.active-card[data-act], .empty-challenge[data-act], .cat-card[data-go], .done-card[data-history]');
+    if (card && e.target === card) {
       e.preventDefault();
-      openDay(parseInt(row.dataset.openDay, 10));
+      card.click();
     }
   });
 
   document.addEventListener('keydown', function (e) {
-    if (e.key === 'Escape') {
-      if (overlay.innerHTML) overlay.innerHTML = '';
-    }
+    if (e.key === 'Escape' && overlay.innerHTML) overlay.innerHTML = '';
   });
 
   /* Native shell bridge. Returns 'exit' when the back button should leave the app. */
@@ -632,28 +721,13 @@
         overlay.innerHTML = '';
         return 'overlay';
       }
-      if (screen === 'quest') {
-        navigate(questReturn || 'home');
-        return 'quest';
-      }
-      if (screen === 'setup') {
-        if (setup.step > 1) {
-          setup.step--;
-          view.scrollTop = 0;
-          render();
-        } else {
-          screen = setup.returnTo || 'welcome';
-          view.scrollTop = 0;
-          render();
-        }
-        return 'setup';
-      }
-      if (screen === 'journey' || screen === 'stats' || screen === 'you' || screen === 'finale') {
-        navigate('home');
-        return 'home';
-      }
-      if (screen === 'welcome') return 'exit';
-      return 'exit';
+      if (screen === 'home') return 'exit';
+      back();
+      return 'handled';
+    },
+    openToday: function () {
+      if (A.hasActive()) openDay(A.currentDay());
+      else navigate('home');
     },
   };
 
